@@ -1,6 +1,7 @@
 import csv
 from datetime import date
 from pathlib import Path
+from typing import Optional
 
 from ..models import Transaction
 from ..ports import TransactionStore
@@ -38,11 +39,15 @@ class TsvTransactionStore(TransactionStore):
         new = [tx for tx in transactions if tx.id not in existing_ids]
 
         merged = existing + new
+        self._write_all(merged)
 
+        return new
+
+    def _write_all(self, transactions: list[Transaction]) -> None:
         with open(self._path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES, delimiter="\t")
             writer.writeheader()
-            for tx in merged:
+            for tx in transactions:
                 writer.writerow(
                     {
                         COL_ID: tx.id,
@@ -53,4 +58,37 @@ class TsvTransactionStore(TransactionStore):
                     }
                 )
 
-        return new
+    def remove(self, ids: str | list[str]) -> list[Transaction]:
+        if isinstance(ids, str):
+            ids = [ids]
+        id_set = set(ids)
+
+        existing = self.read()
+        removed = [tx for tx in existing if tx.id in id_set]
+        remaining = [tx for tx in existing if tx.id not in id_set]
+
+        self._write_all(remaining)
+        return removed
+
+    def modify(
+        self,
+        ids: str | list[str],
+        description: Optional[str] = None,
+        label: Optional[str] = None,
+    ) -> list[Transaction]:
+        if isinstance(ids, str):
+            ids = [ids]
+        id_set = set(ids)
+
+        existing = self.read()
+        modified = []
+        for tx in existing:
+            if tx.id in id_set:
+                if description is not None:
+                    tx.description = description
+                if label is not None:
+                    tx.label = label
+                modified.append(tx)
+
+        self._write_all(existing)
+        return modified

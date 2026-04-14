@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Query, UploadFile
+from pydantic import BaseModel
 
 from ..adapters.csv_transaction_reader import CsvTransactionReader
 from ..adapters.tsv_transaction_store import TsvTransactionStore
 from ..models import AmountFilter, AmountOp, TransactionFilter
+from ..models import ModifyRequest, RemoveRequest
 
 app = FastAPI()
 
@@ -46,3 +48,15 @@ async def read_transactions(
     filtered = tx_filter.apply(transactions)
 
     return [tx.model_dump(mode="json") for tx in filtered]
+
+
+@app.post("/transactions/remove")
+async def remove_transactions(body: RemoveRequest):
+    removed = store.remove(body.ids)
+    return [tx.model_dump(mode="json") for tx in removed]
+
+
+@app.post("/transactions/modify")
+async def modify_transactions(body: ModifyRequest):
+    modified = store.modify(body.ids, description=body.description, label=body.label)
+    return [tx.model_dump(mode="json") for tx in modified]
