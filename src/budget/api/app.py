@@ -5,15 +5,19 @@ from typing import Optional
 from fastapi import FastAPI, Query, UploadFile
 from pydantic import BaseModel
 
+from fastapi import HTTPException
+
 from ..adapters.csv_transaction_reader import CsvTransactionReader
+from ..adapters.tsv_label_store import TsvLabelStore
 from ..adapters.tsv_transaction_store import TsvTransactionStore
 from ..models import AmountFilter, AmountOp, TransactionFilter
 from ..models import ModifyRequest, RemoveRequest
 
 app = FastAPI()
 
-STORAGE_PATH = Path(__file__).resolve().parents[3] / "storage" / "transactions.tsv"
-store = TsvTransactionStore(STORAGE_PATH)
+STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage"
+label_store = TsvLabelStore(STORAGE_DIR / "labels.tsv")
+store = TsvTransactionStore(STORAGE_DIR / "transactions.tsv", label_store)
 reader = CsvTransactionReader()
 
 
@@ -58,5 +62,50 @@ async def remove_transactions(body: RemoveRequest):
 
 @app.post("/transactions/modify")
 async def modify_transactions(body: ModifyRequest):
-    modified = store.modify(body.ids, description=body.description, label=body.label)
+    try:
+        modified = store.modify(body.ids, description=body.description, label=body.label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return [tx.model_dump(mode="json") for tx in modified]
+
+
+# --- Label endpoints ---
+
+
+class CreateLabelRequest(BaseModel):
+    name: str
+    color: str
+
+
+class ModifyLabelRequest(BaseModel):
+    new_name: Optional[str] = None
+    color: Optional[str] = None
+
+
+@app.get("/labels")
+async def list_labels():
+    return [lb.model_dump() for lb in label_store.list()]
+
+
+@app.post("/labels")
+async def create_label(body: CreateLabelRequest):
+    try:
+        label = label_store.create(body.name, body.color)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return label.model_dump()
+
+
+@app.post("/labels/{name}/modify")
+async def modify_label(name: str, body: ModifyLabelRequest):
+    try:
+        label = label_store.modify(name, new_name=body.new_name, color=body.color)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return label.model_dump()
+
+
+@app.post("/labels/remove")
+async def remove_labels(body: RemoveRequest):
+    removed = label_store.remove(body.ids)
+    return [lb.model_dump() for lb in removed]

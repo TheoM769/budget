@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import csv
 from datetime import date
 from pathlib import Path
 from typing import Optional
 
 from ..models import Transaction
-from ..ports import TransactionStore
+from ..ports import LabelStore, TransactionStore
 
 COL_ID = "id"
 COL_DATE = "date"
@@ -16,8 +18,9 @@ FIELDNAMES = [COL_ID, COL_DATE, COL_DESCRIPTION, COL_AMOUNT, COL_LABEL]
 
 
 class TsvTransactionStore(TransactionStore):
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, label_store: LabelStore) -> None:
         self._path = path
+        self._label_store = label_store
 
     def read(self) -> list[Transaction]:
         with open(self._path, newline="") as f:
@@ -79,6 +82,11 @@ class TsvTransactionStore(TransactionStore):
         if isinstance(ids, str):
             ids = [ids]
         id_set = set(ids)
+
+        if label is not None:
+            valid_labels = {lb.name for lb in self._label_store.list()}
+            if label not in valid_labels:
+                raise ValueError(f"Label '{label}' does not exist. Create it first.")
 
         existing = self.read()
         modified = []
