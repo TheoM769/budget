@@ -1,9 +1,12 @@
+from datetime import date
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, Query, UploadFile
 
 from ..adapters.csv_transaction_reader import CsvTransactionReader
 from ..adapters.tsv_transaction_store import TsvTransactionStore
+from ..models import AmountFilter, AmountOp, TransactionFilter
 
 app = FastAPI()
 
@@ -21,6 +24,25 @@ async def upload_transactions(file: UploadFile):
 
 
 @app.get("/transactions")
-async def read_transactions():
+async def read_transactions(
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    description: Optional[str] = Query(None),
+    amount_op: Optional[AmountOp] = Query(None),
+    amount_value: Optional[float] = Query(None),
+):
     transactions = store.read()
-    return [tx.model_dump(mode="json") for tx in transactions]
+
+    amount = None
+    if amount_op is not None and amount_value is not None:
+        amount = AmountFilter(op=amount_op, value=amount_value)
+
+    tx_filter = TransactionFilter(
+        date_from=date_from,
+        date_to=date_to,
+        description=description,
+        amount=amount,
+    )
+    filtered = tx_filter.apply(transactions)
+
+    return [tx.model_dump(mode="json") for tx in filtered]
