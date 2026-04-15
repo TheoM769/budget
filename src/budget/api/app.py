@@ -12,6 +12,7 @@ from ..adapters.tsv_label_store import TsvLabelStore
 from ..adapters.tsv_transaction_store import TsvTransactionStore
 from ..models import AmountFilter, AmountOp, TransactionFilter
 from ..models import ModifyRequest, RemoveRequest
+from ..models.label import Tier
 
 app = FastAPI()
 
@@ -74,32 +75,58 @@ async def modify_transactions(body: ModifyRequest):
 
 class CreateLabelRequest(BaseModel):
     name: str
-    color: str
+    parent_id: str  # must be a tier-2 label id
 
 
 class ModifyLabelRequest(BaseModel):
     new_name: Optional[str] = None
-    color: Optional[str] = None
 
 
 @app.get("/labels")
-async def list_labels():
-    return [lb.model_dump() for lb in label_store.list()]
+async def list_labels(tier: Optional[int] = Query(None)):
+    """List labels, optionally filtered by tier (1, 2, or 3)."""
+    t = Tier(tier) if tier is not None else None
+    return [lb.model_dump() for lb in label_store.list(tier=t)]
+
+
+@app.get("/labels/tree")
+async def label_tree():
+    """Return the full label hierarchy as a nested tree."""
+    all_labels = label_store.list()
+    by_id = {lb.id: lb for lb in all_labels}
+
+    tree = []
+    for t1 in (lb for lb in all_labels if lb.tier == Tier.ONE):
+        t1_node = {"id": t1.id, "name": t1.name, "categories": []}
+        for t2 in (lb for lb in all_labels if lb.tier == Tier.TWO and lb.parent_id == t1.id):
+            t2_node = {
+                "id": t2.id,
+                "name": t2.name,
+                "color": t2.color,
+                "labels": [
+                    {"id": t3.id, "name": t3.name}
+                    for t3 in all_labels
+                    if t3.tier == Tier.THREE and t3.parent_id == t2.id
+                ],
+            }
+            t1_node["categories"].append(t2_node)
+        tree.append(t1_node)
+    return tree
 
 
 @app.post("/labels")
 async def create_label(body: CreateLabelRequest):
     try:
-        label = label_store.create(body.name, body.color)
+        label = label_store.create(body.name, body.parent_id)
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     return label.model_dump()
 
 
 @app.post("/labels/{name}/modify")
 async def modify_label(name: str, body: ModifyLabelRequest):
     try:
-        label = label_store.modify(name, new_name=body.new_name, color=body.color)
+        label = label_store.modify(name, new_name=body.new_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return label.model_dump()

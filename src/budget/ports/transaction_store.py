@@ -27,5 +27,7 @@ class TransactionStore(ABC):
         description: Optional[str] = None,
         label: Optional[str] = None,
     ) -> list[Transaction]:
-        """Modify description and/or label for transaction(s) by id(s). Returns the modified transactions."""
+        """Modify description and/or label for transaction(s) by id(s).
+        The label parameter accepts a label *name* which is resolved to its id internally.
+        Returns the modified transactions."""
         pass

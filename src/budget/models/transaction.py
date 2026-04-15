@@ -6,4 +6,4 @@ class Transaction(BaseModel):
     date: datetime.date
     description: str
     amount: float
-    label: str = "None"
+    label_id: str = ""

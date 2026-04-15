@@ -12,9 +12,9 @@ COL_ID = "id"
 COL_DATE = "date"
 COL_DESCRIPTION = "description"
 COL_AMOUNT = "amount"
-COL_LABEL = "label"
+COL_LABEL_ID = "label_id"
 
-FIELDNAMES = [COL_ID, COL_DATE, COL_DESCRIPTION, COL_AMOUNT, COL_LABEL]
+FIELDNAMES = [COL_ID, COL_DATE, COL_DESCRIPTION, COL_AMOUNT, COL_LABEL_ID]
 
 
 class TsvTransactionStore(TransactionStore):
@@ -31,7 +31,7 @@ class TsvTransactionStore(TransactionStore):
                     date=date.fromisoformat(row[COL_DATE]),
                     description=row[COL_DESCRIPTION],
                     amount=float(row[COL_AMOUNT]),
-                    label=row.get(COL_LABEL, ""),
+                    label_id=row.get(COL_LABEL_ID, ""),
                 )
                 for row in reader
             ]
@@ -57,7 +57,7 @@ class TsvTransactionStore(TransactionStore):
                         COL_DATE: tx.date.isoformat(),
                         COL_DESCRIPTION: tx.description,
                         COL_AMOUNT: tx.amount,
-                        COL_LABEL: tx.label,
+                        COL_LABEL_ID: tx.label_id,
                     }
                 )
 
@@ -83,10 +83,12 @@ class TsvTransactionStore(TransactionStore):
             ids = [ids]
         id_set = set(ids)
 
+        label_id: str | None = None
         if label is not None:
-            valid_labels = {lb.name for lb in self._label_store.list()}
-            if label not in valid_labels:
+            found = self._label_store.get_by_name(label)
+            if found is None:
                 raise ValueError(f"Label '{label}' does not exist. Create it first.")
+            label_id = found.id
 
         existing = self.read()
         modified = []
@@ -94,8 +96,8 @@ class TsvTransactionStore(TransactionStore):
             if tx.id in id_set:
                 if description is not None:
                     tx.description = description
-                if label is not None:
-                    tx.label = label
+                if label_id is not None:
+                    tx.label_id = label_id
                 modified.append(tx)
 
         self._write_all(existing)
