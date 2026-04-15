@@ -24,7 +24,11 @@ reader = CsvTransactionReader()
 
 @app.post("/transactions/upload")
 async def upload_transactions(file: UploadFile):
-    content = (await file.read()).decode("latin-1")
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        content = raw.decode("latin-1")
     transactions = reader.read_transactions(content)
     new = store.write(transactions)
     return [tx.model_dump(mode="json") for tx in new]
