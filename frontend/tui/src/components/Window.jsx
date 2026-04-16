@@ -5,7 +5,8 @@ import { colors } from "../utils/theme.js";
 export default function Window({ title, footer, children }) {
   const { stdout } = useStdout();
   const termWidth = stdout?.columns || 80;
-  // Account for border (2) + paddingX (2)
+  const termRows = stdout?.rows || 24;
+  // reserve 1 row for BottomBar
   const innerWidth = Math.max(20, termWidth - 4);
 
   return (
@@ -13,21 +14,17 @@ export default function Window({ title, footer, children }) {
       flexDirection="column"
       borderStyle="round"
       borderColor={colors.primary}
-      width="100%"
-      minHeight={20}
+      width={termWidth}
+      height={termRows - 1}
     >
       {/* Header */}
       <Box paddingX={1} justifyContent="space-between">
-        <Text bold color={colors.primary}>
-          {title}
-        </Text>
+        <Text bold color={colors.primary}>{title}</Text>
         <Text color={colors.textMuted}>Esc: Back</Text>
       </Box>
 
       <Box paddingX={1}>
-        <Text color={colors.textMuted}>
-          {"─".repeat(innerWidth)}
-        </Text>
+        <Text color={colors.textMuted}>{"─".repeat(innerWidth)}</Text>
       </Box>
 
       {/* Content */}
@@ -39,9 +36,7 @@ export default function Window({ title, footer, children }) {
       {footer && (
         <>
           <Box paddingX={1}>
-            <Text color={colors.textMuted}>
-              {"─".repeat(innerWidth)}
-            </Text>
+            <Text color={colors.textMuted}>{"─".repeat(innerWidth)}</Text>
           </Box>
           <Box paddingX={1}>
             <Text color={colors.textMuted}>{footer}</Text>

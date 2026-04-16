@@ -4,11 +4,12 @@ import TextInput from "ink-text-input";
 import Window from "../components/Window.jsx";
 import ConfirmationModal from "../components/ConfirmationModal.jsx";
 import StatusBar from "../components/StatusBar.jsx";
-import { getTransactions, removeTransactions, modifyTransactions } from "../utils/api.js";
+import RuleForm from "../components/RuleForm.jsx";
+import { getTransactions, removeTransactions, modifyTransactions, getLabelTree, createRule } from "../utils/api.js";
 import { formatCurrency, truncate } from "../utils/formatting.js";
 import { colors, amountColor } from "../utils/theme.js";
 
-const MODES = { LIST: "list", ADD: "add", EDIT: "edit", LABEL: "label" };
+const MODES = { LIST: "list", ADD: "add", EDIT: "edit", LABEL: "label", RULE: "rule" };
 const PAGE_SIZE = 15;
 
 export default function TransactionWindow({ onClose, labels }) {
@@ -25,6 +26,7 @@ export default function TransactionWindow({ onClose, labels }) {
   const [filterDesc, setFilterDesc] = useState("");
   const [showFilter, setShowFilter] = useState(false);
   const [offset, setOffset] = useState(0);
+  const [flat, setFlat] = useState([]);
 
   const fetchData = async (descFilter) => {
     setLoading(true);
@@ -32,8 +34,14 @@ export default function TransactionWindow({ onClose, labels }) {
     try {
       const filters = {};
       if (descFilter) filters.description = descFilter;
-      const data = await getTransactions(filters);
+      const [data, tree] = await Promise.all([getTransactions(filters), getLabelTree()]);
       setTransactions(data);
+      const f = [];
+      for (const t1 of tree)
+        for (const t2 of t1.categories || [])
+          for (const t3 of t2.labels || [])
+            f.push({ ...t3, category: t2.name, group: t1.name });
+      setFlat(f);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -118,6 +126,10 @@ export default function TransactionWindow({ onClose, labels }) {
       setLabelInput(visible[cursor].label_id || "");
     }
 
+    if (ch === "c") {
+      setMode(MODES.RULE);
+    }
+
     if (ch === "f") {
       setShowFilter(true);
     }
@@ -126,6 +138,21 @@ export default function TransactionWindow({ onClose, labels }) {
       fetchData(filterDesc || undefined);
     }
   });
+
+  const handleRuleSubmit = async (pattern, labelId) => {
+    try {
+      const result = await createRule(pattern, labelId);
+      const applied = result.applied ?? 0;
+      setStatus({
+        message: `Rule created — ${applied} transaction${applied !== 1 ? "s" : ""} labeled`,
+        type: "success",
+      });
+      await fetchData(filterDesc || undefined);
+    } catch (e) {
+      setStatus({ message: e.message, type: "error" });
+    }
+    setMode(MODES.LIST);
+  };
 
   const handleDelete = async () => {
     try {
@@ -174,7 +201,7 @@ export default function TransactionWindow({ onClose, labels }) {
     fetchData(filterDesc || undefined);
   };
 
-  const footer = "↑↓:nav │ Space:select │ d:delete │ e:edit │ l:label │ f:filter │ r:refresh │ n/p:page │ Esc:back";
+  const footer = "↑↓:nav │ Space:select │ d:delete │ e:edit │ l:label │ c:rule │ f:filter │ r:refresh │ n/p:page │ Esc:back";
 
   return (
     <Window title={`TRANSACTIONS (${transactions.length})`} footer={footer}>
@@ -219,6 +246,17 @@ export default function TransactionWindow({ onClose, labels }) {
             value={labelInput}
             onChange={setLabelInput}
             onSubmit={handleLabelSubmit}
+          />
+        </Box>
+      )}
+
+      {mode === MODES.RULE && (
+        <Box marginBottom={1}>
+          <RuleForm
+            flat={flat}
+            defaultPattern={visible[cursor]?.description.toUpperCase().split(/\s+/).find((w) => w.length >= 3) ?? ""}
+            onSubmit={handleRuleSubmit}
+            onCancel={() => setMode(MODES.LIST)}
           />
         </Box>
       )}

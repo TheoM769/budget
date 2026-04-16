@@ -98,3 +98,27 @@ export async function removeLabels(ids) {
     body: JSON.stringify({ ids }),
   });
 }
+
+// --- Rules ---
+
+export async function getRules() {
+  return request("/rules");
+}
+
+export async function createRule(pattern, labelId) {
+  return request("/rules", {
+    method: "POST",
+    body: JSON.stringify({ pattern, label_id: labelId }),
+  });
+}
+
+export async function removeRules(ids) {
+  return request("/rules/remove", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export async function applyRules() {
+  return request("/rules/apply", { method: "POST" });
+}

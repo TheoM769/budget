@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from ..adapters.csv_transaction_reader import CsvTransactionReader
 from ..adapters.tsv_label_store import TsvLabelStore
+from ..adapters.tsv_rule_store import TsvRuleStore
 from ..adapters.tsv_transaction_store import TsvTransactionStore
 from ..models import AmountFilter, AmountOp, TransactionFilter
 from ..models import ModifyRequest, RemoveRequest
@@ -19,6 +20,7 @@ app = FastAPI()
 STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage"
 label_store = TsvLabelStore(STORAGE_DIR / "labels.tsv")
 store = TsvTransactionStore(STORAGE_DIR / "transactions.tsv", label_store)
+rule_store = TsvRuleStore(STORAGE_DIR / "rules.tsv", label_store, store)
 reader = CsvTransactionReader()
 
 
@@ -31,6 +33,8 @@ async def upload_transactions(file: UploadFile):
         content = raw.decode("latin-1")
     transactions = reader.read_transactions(content)
     new = store.write(transactions)
+    # Apply existing rules to newly imported transactions
+    rule_store.apply(new)
     return [tx.model_dump(mode="json") for tx in new]
 
 
@@ -140,3 +144,47 @@ async def modify_label(name: str, body: ModifyLabelRequest):
 async def remove_labels(body: RemoveRequest):
     removed = label_store.remove(body.ids)
     return [lb.model_dump() for lb in removed]
+
+
+# --- Rule endpoints ---
+
+
+class CreateRuleRequest(BaseModel):
+    pattern: str   # regex
+    label_id: str  # tier-3 label id
+
+
+@app.get("/rules")
+async def list_rules():
+    return [r.model_dump() for r in rule_store.list()]
+
+
+@app.post("/rules")
+async def create_rule(body: CreateRuleRequest):
+    try:
+        rule = rule_store.create(body.pattern, body.label_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Immediately apply the new rule to all existing transactions
+    all_txs = store.read()
+    applied = rule_store.apply(all_txs)
+    return {
+        "rule": rule.model_dump(),
+        "applied": len(applied),
+    }
+
+
+@app.post("/rules/remove")
+async def remove_rules(body: RemoveRequest):
+    removed = rule_store.remove(body.ids)
+    return [r.model_dump() for r in removed]
+
+
+@app.post("/rules/apply")
+async def apply_rules():
+    all_txs = store.read()
+    applied = rule_store.apply(all_txs)
+    return {
+        "applied": len(applied),
+        "transactions": [tx.model_dump(mode="json") for tx in applied],
+    }
