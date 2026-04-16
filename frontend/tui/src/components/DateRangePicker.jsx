@@ -54,6 +54,7 @@ function buildGrid(year, month) {
  *   initialFrom / initialTo  – current filter values (or null)
  *   onConfirm(from, to) – called with the confirmed date range strings
  *   onClose()           – called on Esc (no change)
+ *   focused             – when false, captures no keyboard input; border dims
  */
 export default function DateRangePicker({
   minDate,
@@ -62,6 +63,7 @@ export default function DateRangePicker({
   initialTo,
   onConfirm,
   onClose,
+  focused = true,
 }) {
   const anchor =
     (initialFrom && (!minDate || initialFrom >= minDate) ? initialFrom : null) ||
@@ -121,7 +123,7 @@ export default function DateRangePicker({
 
   useInput((ch, key) => {
     if (key.escape) {
-      onClose();
+      onClose && onClose();
       return;
     }
 
@@ -175,7 +177,7 @@ export default function DateRangePicker({
       setStep("start");
       return;
     }
-  });
+  }, { isActive: focused });
 
   const grid = buildGrid(viewYear, viewMonth);
   const DOW = ["S", "M", "T", "W", "T", "F", "S"];
@@ -200,12 +202,12 @@ export default function DateRangePicker({
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor={colors.primary}
+      borderColor={focused ? colors.primary : colors.textMuted}
       paddingX={1}
       width={32}
     >
       {/* Title */}
-      <Text bold color={colors.primary}>
+      <Text bold color={focused ? colors.primary : colors.textMuted}>
         Period
       </Text>
 
@@ -252,12 +254,10 @@ export default function DateRangePicker({
             let textColor, bg, strike, dim;
 
             if (blocked) {
-              // Outside transaction bounds: strikethrough + very dim
-              // Design trick: dates still legible but clearly unavailable
               textColor = "#3d3d3d";
               strike = true;
               dim = true;
-            } else if (isCursor) {
+            } else if (isCursor && focused) {
               textColor = "#ffffff";
               bg = CURSOR_BG;
             } else if (endpoint) {
@@ -267,7 +267,6 @@ export default function DateRangePicker({
               textColor = colors.warning;
               bg = RANGE_BG;
             } else if (!isCurMonth) {
-              // Overflow days from adjacent months
               textColor = "#484848";
             } else {
               textColor = colors.text;
@@ -293,14 +292,16 @@ export default function DateRangePicker({
       <Box justifyContent="space-between" marginTop={1}>
         <Text color={colors.textMuted}>{"←"}</Text>
         <Text color={colors.textMuted}>
-          {step === "start"
-            ? "↵ pick start · m:month"
-            : "↵ pick end · r:reset"}
+          {focused
+            ? step === "start"
+              ? "↵ pick start · m:month"
+              : "↵ pick end · r:reset"
+            : "d: focus"}
         </Text>
         <Text color={colors.textMuted}>{"→"}</Text>
       </Box>
       <Box justifyContent="center">
-        <Text color={colors.textMuted}>[ ] months · esc cancel</Text>
+        <Text color={colors.textMuted}>[ ] months · esc:done</Text>
       </Box>
     </Box>
   );

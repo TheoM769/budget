@@ -6,7 +6,7 @@ import { getTransactions, getLabelTree } from "../utils/api.js";
 import { formatCurrency } from "../utils/formatting.js";
 import { colors, amountColor } from "../utils/theme.js";
 
-const BAR_WIDTH = 30;
+const BAR_WIDTH = 28;
 
 function buildBar(value, max) {
   if (max === 0) return "";
@@ -14,11 +14,12 @@ function buildBar(value, max) {
   return "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
 }
 
-const SANKEY_HEIGHT = 18;
-const LEFT_BAR_W = 8;
-const FLOW_W = 10;
-const MAX_RIGHT_BAR = 16;
-const RIGHT_LABEL_W = 16;
+const SANKEY_HEIGHT = 16;
+const MAX_LEFT_BAR = 6;
+const FLOW_W = 8;
+const MAX_RIGHT_BAR = 12;
+const LEFT_LABEL_W = 13;
+const RIGHT_LABEL_W = 14;
 
 const PALETTE = [
   "#5865F2", "#FAA61A", "#9B59B6", "#1ABC9C",
@@ -52,6 +53,18 @@ function allocateRows(items, total) {
   return result;
 }
 
+function expandBands(bands, maxBarW, totalVal) {
+  return bands.flatMap((band) => {
+    const barW = Math.max(1, Math.round((band.value / totalVal) * maxBarW));
+    return Array.from({ length: band.height }, (_, i) => ({
+      showLabel: i === Math.floor(band.height / 2),
+      label: band.label,
+      color: band.color,
+      barW,
+    }));
+  });
+}
+
 function buildLabelMap(tree) {
   const map = {};
   for (const t1 of tree) {
@@ -78,7 +91,7 @@ function buildLabelColorMap(tree) {
   return map;
 }
 
-function SankeyDiagram({ transactions, income, tree }) {
+function SankeyDiagram({ transactions, tree }) {
   if (!transactions.length) {
     return (
       <Text color={colors.textMuted}>No transaction data for diagram.</Text>
@@ -88,6 +101,14 @@ function SankeyDiagram({ transactions, income, tree }) {
   const idToName = buildLabelMap(tree);
   const idToColor = buildLabelColorMap(tree);
 
+  // Group income by source label
+  const incomeGroups = {};
+  for (const tx of transactions) {
+    if (tx.amount <= 0) continue;
+    const key = tx.label_id ? String(tx.label_id) : "Other";
+    incomeGroups[key] = (incomeGroups[key] || 0) + tx.amount;
+  }
+
   // Group expenses by label
   const expenseGroups = {};
   for (const tx of transactions) {
@@ -96,13 +117,20 @@ function SankeyDiagram({ transactions, income, tree }) {
     expenseGroups[key] = (expenseGroups[key] || 0) + Math.abs(tx.amount);
   }
 
+  const totalIncome = Object.values(incomeGroups).reduce((s, v) => s + v, 0);
   const totalExpense = Object.values(expenseGroups).reduce((s, v) => s + v, 0);
-  const savings = income - totalExpense;
+  const savings = totalIncome - totalExpense;
   if (savings > 0) expenseGroups["Savings"] = savings;
 
-  const rightTotal = Math.max(income, totalExpense);
+  const leftItems = Object.entries(incomeGroups)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, value], idx) => ({
+      key,
+      value,
+      label: idToName[key] || key,
+      color: idToColor[key] || PALETTE[idx % PALETTE.length],
+    }));
 
-  // Build bands: sorted by size, each with a distinct color
   const rightItems = Object.entries(expenseGroups)
     .sort((a, b) => b[1] - a[1])
     .map(([key, value], idx) => ({
@@ -113,26 +141,21 @@ function SankeyDiagram({ transactions, income, tree }) {
       color:
         key === "Savings"
           ? colors.success
-          : idToColor[key] || PALETTE[idx % PALETTE.length],
+          : idToColor[key] || PALETTE[(idx + leftItems.length) % PALETTE.length],
     }));
 
+  if (!leftItems.length && !rightItems.length) {
+    return <Text color={colors.textMuted}>No flow data.</Text>;
+  }
+
+  const leftTotal = Math.max(totalIncome, 0.01);
+  const rightTotal = Math.max(totalIncome, totalExpense, 0.01);
+
+  const leftBands = allocateRows(leftItems, SANKEY_HEIGHT);
   const rightBands = allocateRows(rightItems, SANKEY_HEIGHT);
 
-  // Expand each band into per-row data
-  const rightRows = rightBands.flatMap((band) => {
-    const pct = Math.round((band.value / rightTotal) * 100);
-    // Right bar width encodes proportion (second visual cue alongside height)
-    const barW = Math.max(1, Math.round((band.value / rightTotal) * MAX_RIGHT_BAR));
-    return Array.from({ length: band.height }, (_, i) => ({
-      showLabel: i === Math.floor(band.height / 2),
-      label: band.label,
-      value: band.value,
-      isSavings: band.isSavings,
-      color: band.color,
-      pct,
-      barW,
-    }));
-  });
+  const leftRows = expandBands(leftBands, MAX_LEFT_BAR, leftTotal);
+  const rightRows = expandBands(rightBands, MAX_RIGHT_BAR, rightTotal);
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -141,38 +164,52 @@ function SankeyDiagram({ transactions, income, tree }) {
       </Text>
       <Box marginBottom={0}>
         <Text color={colors.textMuted}>
-          {"INCOME".padEnd(LEFT_BAR_W + FLOW_W + 2)}
+          {"INCOME SOURCES".padEnd(LEFT_LABEL_W + MAX_LEFT_BAR + FLOW_W + 2)}
         </Text>
         <Text color={colors.textMuted}>EXPENSES / SAVINGS</Text>
       </Box>
-      {rightRows.map((row, i) => (
-        <Box key={i}>
-          {/* Left income bar — always full, always green */}
-          <Text color={colors.success}>{"█".repeat(LEFT_BAR_W)}</Text>
-          {/* Flow line colored by destination category */}
-          <Text color={row.color}>{"─".repeat(FLOW_W)}</Text>
-          {/* Right bar: variable width encodes proportion */}
-          <Text color={row.color}>
-            {"█".repeat(row.barW)}
-            {"░".repeat(MAX_RIGHT_BAR - row.barW)}
-          </Text>
-          {/* Label row: name + percentage + amount */}
-          {row.showLabel ? (
-            <Box>
-              <Text color={row.color}>
-                {" "}
-                {row.label.slice(0, RIGHT_LABEL_W).padEnd(RIGHT_LABEL_W)}
+      {Array.from({ length: SANKEY_HEIGHT }, (_, i) => {
+        const left = leftRows[i];
+        const right = rightRows[i];
+        return (
+          <Box key={i}>
+            {/* Left label */}
+            {left?.showLabel ? (
+              <Text color={left.color}>
+                {left.label.slice(0, LEFT_LABEL_W).padEnd(LEFT_LABEL_W)}
               </Text>
-              <Text color={colors.textMuted}>
-                {String(row.pct).padStart(3)}%{"  "}
+            ) : (
+              <Text>{" ".repeat(LEFT_LABEL_W)}</Text>
+            )}
+            {/* Income source bar */}
+            {left ? (
+              <Text color={left.color}>
+                {"█".repeat(left.barW)}{"░".repeat(MAX_LEFT_BAR - left.barW)}
               </Text>
-              <Text color={row.color}>
-                {formatCurrency(row.isSavings ? row.value : -row.value)}
+            ) : (
+              <Text>{" ".repeat(MAX_LEFT_BAR)}</Text>
+            )}
+            {/* Flow line colored by destination */}
+            <Text color={right?.color ?? colors.textMuted}>
+              {"─".repeat(FLOW_W)}
+            </Text>
+            {/* Expense bar */}
+            {right ? (
+              <Text color={right.color}>
+                {"█".repeat(right.barW)}{"░".repeat(MAX_RIGHT_BAR - right.barW)}
               </Text>
-            </Box>
-          ) : null}
-        </Box>
-      ))}
+            ) : (
+              <Text>{" ".repeat(MAX_RIGHT_BAR)}</Text>
+            )}
+            {/* Right label */}
+            {right?.showLabel ? (
+              <Text color={right.color}>
+                {" "}{right.label.slice(0, RIGHT_LABEL_W)}
+              </Text>
+            ) : null}
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -183,7 +220,7 @@ export default function AnalyticsWindow({ onClose }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [dateFilter, setDateFilter] = useState({ from: null, to: null });
-  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [pickerFocused, setPickerFocused] = useState(false);
   const [txBounds, setTxBounds] = useState({ min: null, max: null });
   const boundsLoaded = useRef(false);
 
@@ -220,10 +257,10 @@ export default function AnalyticsWindow({ onClose }) {
   useInput(
     (ch, key) => {
       if (key.escape) onClose();
-      if (ch === "d") setShowDatePicker(true);
-      if (ch === "r" && dateFilter.from) setDateFilter({ from: null, to: null });
+      if (ch === "d") setPickerFocused(true);
+      if (ch === "r") setDateFilter({ from: null, to: null });
     },
-    { isActive: !showDatePicker }
+    { isActive: !pickerFocused }
   );
 
   // Compute metrics
@@ -235,14 +272,17 @@ export default function AnalyticsWindow({ onClose }) {
     .reduce((s, tx) => s + Math.abs(tx.amount), 0);
   const net = income - expense;
 
-  // Spending by label
+  // Spending by label (resolved to names)
+  const idToName = buildLabelMap(tree);
   const byLabel = {};
   for (const tx of transactions) {
     if (tx.amount >= 0) continue;
-    const key = tx.label_id || "Unlabeled";
+    const key = tx.label_id ? String(tx.label_id) : "Unlabeled";
     byLabel[key] = (byLabel[key] || 0) + Math.abs(tx.amount);
   }
-  const sortedLabels = Object.entries(byLabel).sort((a, b) => b[1] - a[1]);
+  const sortedLabels = Object.entries(byLabel)
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, amount]) => [idToName[id] || id, amount]);
   const maxAmount = sortedLabels.length > 0 ? sortedLabels[0][1] : 0;
 
   // Monthly trend
@@ -261,8 +301,8 @@ export default function AnalyticsWindow({ onClose }) {
       : null;
 
   const footer = filterLabel
-    ? `Esc: back   d: change filter   r: clear filter  │  ${filterLabel}`
-    : "Esc: back   d: date filter";
+    ? `d: date picker   r: clear filter  │  ${filterLabel}`
+    : "d: date picker";
 
   return (
     <Window title="ANALYTICS" footer={footer}>
@@ -270,119 +310,118 @@ export default function AnalyticsWindow({ onClose }) {
       {error && <Text color={colors.danger}>Error: {error}</Text>}
 
       {!loading && (
-        <Box flexDirection="column">
-          {/* Key Metrics */}
-          <Box
-            flexDirection="column"
-            borderStyle="round"
-            borderColor={colors.textMuted}
-            paddingX={2}
-            paddingY={1}
-            marginBottom={1}
-          >
-            <Text bold color={colors.primary}>
-              SUMMARY
-            </Text>
-            <Box gap={2} marginTop={1}>
-              <Box flexDirection="column" width={25}>
-                <Text color={colors.textMuted}>Total Income</Text>
-                <Text bold color={colors.success}>
-                  {formatCurrency(income)}
+        <Box flexDirection="column" flexGrow={1}>
+          {/* Top section: main content left, date picker right */}
+          <Box flexDirection="row" alignItems="flex-start" gap={2}>
+            {/* Left column: summary + spending + trend */}
+            <Box flexDirection="column" flexGrow={1}>
+              {/* Summary */}
+              <Box
+                flexDirection="column"
+                borderStyle="round"
+                borderColor={colors.textMuted}
+                paddingX={2}
+                paddingY={1}
+                marginBottom={1}
+              >
+                <Text bold color={colors.primary}>
+                  SUMMARY
                 </Text>
-              </Box>
-              <Box flexDirection="column" width={25}>
-                <Text color={colors.textMuted}>Total Expense</Text>
-                <Text bold color={colors.danger}>
-                  {formatCurrency(-expense)}
-                </Text>
-              </Box>
-              <Box flexDirection="column" width={25}>
-                <Text color={colors.textMuted}>Net</Text>
-                <Text bold color={amountColor(net)}>
-                  {formatCurrency(net)}
-                </Text>
-              </Box>
-            </Box>
-            <Box marginTop={1}>
-              <Text color={colors.textMuted}>
-                Transactions: {transactions.length}
-              </Text>
-            </Box>
-          </Box>
-
-          {/* Sankey Flow Diagram */}
-          <SankeyDiagram
-            transactions={transactions}
-            income={income}
-            tree={tree}
-          />
-
-          {/* Spending by Label */}
-          <Box flexDirection="column" marginBottom={1}>
-            <Text bold color={colors.primary}>
-              SPENDING BY LABEL
-            </Text>
-            {sortedLabels.slice(0, 10).map(([label, amount]) => (
-              <Box key={label} gap={1}>
-                <Text color={colors.text}>
-                  {label.padEnd(18)}
-                </Text>
-                <Text color={colors.danger}>{buildBar(amount, maxAmount)}</Text>
-                <Text color={colors.textMuted}>
-                  {" "}
-                  {formatCurrency(-amount)}
-                </Text>
-              </Box>
-            ))}
-            {sortedLabels.length === 0 && (
-              <Text color={colors.textMuted}>No expense data.</Text>
-            )}
-          </Box>
-
-          {/* Monthly Trend */}
-          {months.length > 0 && (
-            <Box flexDirection="column">
-              <Text bold color={colors.primary}>
-                MONTHLY TREND
-              </Text>
-              {months.slice(-6).map((month) => {
-                const data = byMonth[month];
-                return (
-                  <Box key={month} gap={1}>
-                    <Text color={colors.textMuted}>{month}</Text>
-                    <Text color={colors.success}>
-                      {" ↑"}
-                      {formatCurrency(data.income).padStart(10)}
-                    </Text>
-                    <Text color={colors.danger}>
-                      {" ↓"}
-                      {formatCurrency(-data.expense).padStart(10)}
-                    </Text>
-                    <Text color={amountColor(data.income - data.expense)}>
-                      {" = "}
-                      {formatCurrency(data.income - data.expense)}
+                <Box gap={2} marginTop={1}>
+                  <Box flexDirection="column" width={22}>
+                    <Text color={colors.textMuted}>Income</Text>
+                    <Text bold color={colors.success}>
+                      {formatCurrency(income)}
                     </Text>
                   </Box>
-                );
-              })}
+                  <Box flexDirection="column" width={22}>
+                    <Text color={colors.textMuted}>Expense</Text>
+                    <Text bold color={colors.danger}>
+                      {formatCurrency(-expense)}
+                    </Text>
+                  </Box>
+                  <Box flexDirection="column" width={22}>
+                    <Text color={colors.textMuted}>Net</Text>
+                    <Text bold color={amountColor(net)}>
+                      {formatCurrency(net)}
+                    </Text>
+                  </Box>
+                </Box>
+                <Box marginTop={1}>
+                  <Text color={colors.textMuted}>
+                    {transactions.length} transactions
+                  </Text>
+                </Box>
+              </Box>
+
+              {/* Spending by Label */}
+              <Box flexDirection="column" marginBottom={1}>
+                <Text bold color={colors.primary}>
+                  SPENDING BY LABEL
+                </Text>
+                {sortedLabels.slice(0, 8).map(([label, amount]) => (
+                  <Box key={label} gap={1}>
+                    <Text color={colors.text}>
+                      {label.slice(0, 16).padEnd(16)}
+                    </Text>
+                    <Text color={colors.danger}>{buildBar(amount, maxAmount)}</Text>
+                    <Text color={colors.textMuted}>
+                      {"  "}{formatCurrency(-amount)}
+                    </Text>
+                  </Box>
+                ))}
+                {sortedLabels.length === 0 && (
+                  <Text color={colors.textMuted}>No expense data.</Text>
+                )}
+              </Box>
+
+              {/* Monthly Trend */}
+              {months.length > 0 && (
+                <Box flexDirection="column">
+                  <Text bold color={colors.primary}>
+                    MONTHLY TREND
+                  </Text>
+                  {months.slice(-6).map((month) => {
+                    const data = byMonth[month];
+                    return (
+                      <Box key={month} gap={1}>
+                        <Text color={colors.textMuted}>{month}</Text>
+                        <Text color={colors.success}>
+                          {" ↑"}
+                          {formatCurrency(data.income).padStart(10)}
+                        </Text>
+                        <Text color={colors.danger}>
+                          {" ↓"}
+                          {formatCurrency(-data.expense).padStart(10)}
+                        </Text>
+                        <Text color={amountColor(data.income - data.expense)}>
+                          {" = "}
+                          {formatCurrency(data.income - data.expense)}
+                        </Text>
+                      </Box>
+                    );
+                  })}
+                </Box>
+              )}
             </Box>
-          )}
-        </Box>
-      )}
-      {/* Date range picker overlay — floats over content when open */}
-      {showDatePicker && (
-        <Box position="absolute" top={2} left={4}>
-          <DateRangePicker
-            minDate={txBounds.min}
-            maxDate={txBounds.max}
-            initialFrom={dateFilter.from}
-            initialTo={dateFilter.to}
-            onConfirm={(from, to) => {
-              setDateFilter({ from, to });
-              setShowDatePicker(false);
-            }}
-            onClose={() => setShowDatePicker(false)}
-          />
+
+            {/* Right column: always-visible date picker */}
+            <DateRangePicker
+              minDate={txBounds.min}
+              maxDate={txBounds.max}
+              initialFrom={dateFilter.from}
+              initialTo={dateFilter.to}
+              focused={pickerFocused}
+              onConfirm={(from, to) => {
+                setDateFilter({ from, to });
+                setPickerFocused(false);
+              }}
+              onClose={() => setPickerFocused(false)}
+            />
+          </Box>
+
+          {/* Sankey diagram — full width */}
+          <SankeyDiagram transactions={transactions} tree={tree} />
         </Box>
       )}
     </Window>
