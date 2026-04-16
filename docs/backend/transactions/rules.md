@@ -28,7 +28,3 @@ Apply : Run all rules against a provided list of transactions.
 ## Service : Rule Engine
 
 Service instantiated with a `Rule Store` and a `Transaction Storage`. Coordinates rule application across import and manual triggers.
-
-- On rule creation: apply the new rule to all existing transactions.
-- On transaction import: apply all existing rules to newly imported transactions.
-- On manual trigger: re-apply all rules to all transactions.
