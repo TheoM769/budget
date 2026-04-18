@@ -14,12 +14,13 @@ function buildBar(value, max) {
   return "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
 }
 
-const SANKEY_HEIGHT = 16;
-const MAX_LEFT_BAR = 6;
-const FLOW_W = 8;
-const MAX_RIGHT_BAR = 12;
-const LEFT_LABEL_W = 13;
-const RIGHT_LABEL_W = 14;
+const SANKEY_HEIGHT = 14;
+const MAX_LEFT_BAR = 10;
+const FLOW_W = 12;
+const MAX_RIGHT_BAR = 16;
+const LEFT_LABEL_W = 14;
+const RIGHT_LABEL_W = 16;
+const AMOUNT_W = 12;
 
 const PALETTE = [
   "#5865F2", "#FAA61A", "#9B59B6", "#1ABC9C",
@@ -157,6 +158,22 @@ function SankeyDiagram({ transactions, tree }) {
   const leftRows = expandBands(leftBands, MAX_LEFT_BAR, leftTotal);
   const rightRows = expandBands(rightBands, MAX_RIGHT_BAR, rightTotal);
 
+  // Get unique amounts for each label
+  const leftLabelAmounts = leftItems.reduce((acc, item) => {
+    acc[item.key] = item.value;
+    return acc;
+  }, {});
+  const rightLabelAmounts = rightItems.reduce((acc, item) => {
+    acc[item.key] = item.value;
+    return acc;
+  }, {});
+
+  const formatAmount = (val) => {
+    const abs = Math.abs(val);
+    if (abs >= 1000) return `€${(val / 1000).toFixed(1)}k`;
+    return `€${val.toFixed(0)}`;
+  };
+
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text bold color={colors.primary}>
@@ -171,6 +188,8 @@ function SankeyDiagram({ transactions, tree }) {
       {Array.from({ length: SANKEY_HEIGHT }, (_, i) => {
         const left = leftRows[i];
         const right = rightRows[i];
+        const showLeftAmount = left?.showLabel && leftLabelAmounts[left.key];
+        const showRightAmount = right?.showLabel && rightLabelAmounts[right.key];
         return (
           <Box key={i}>
             {/* Left label */}
@@ -206,10 +225,30 @@ function SankeyDiagram({ transactions, tree }) {
               <Text color={right.color}>
                 {" "}{right.label.slice(0, RIGHT_LABEL_W)}
               </Text>
-            ) : null}
+            ) : (
+              <Text>{" ".repeat(RIGHT_LABEL_W + 1)}</Text>
+            )}
+            {/* Amount on the right */}
+            {showRightAmount ? (
+              <Text color={right.color}>
+                {formatAmount(-rightLabelAmounts[right.key]).padStart(AMOUNT_W)}
+              </Text>
+            ) : (
+              <Text>{" ".repeat(AMOUNT_W)}</Text>
+            )}
           </Box>
         );
       })}
+      {/* Income amounts at the bottom */}
+      <Box marginTop={0}>
+        <Text>{" ".repeat(LEFT_LABEL_W)}</Text>
+        <Text color={colors.textMuted}>
+          {leftItems
+            .map((item) => formatAmount(item.value).padStart(MAX_LEFT_BAR))
+            .join("")}
+        </Text>
+        <Text>{" ".repeat(FLOW_W + MAX_RIGHT_BAR + RIGHT_LABEL_W + 1)}</Text>
+      </Box>
     </Box>
   );
 }
@@ -352,27 +391,6 @@ export default function AnalyticsWindow({ onClose }) {
                     {transactions.length} transactions
                   </Text>
                 </Box>
-              </Box>
-
-              {/* Spending by Label */}
-              <Box flexDirection="column" marginBottom={1}>
-                <Text bold color={colors.primary}>
-                  SPENDING BY LABEL
-                </Text>
-                {sortedLabels.slice(0, 8).map(([label, amount]) => (
-                  <Box key={label} gap={1}>
-                    <Text color={colors.text}>
-                      {label.slice(0, 16).padEnd(16)}
-                    </Text>
-                    <Text color={colors.danger}>{buildBar(amount, maxAmount)}</Text>
-                    <Text color={colors.textMuted}>
-                      {"  "}{formatCurrency(-amount)}
-                    </Text>
-                  </Box>
-                ))}
-                {sortedLabels.length === 0 && (
-                  <Text color={colors.textMuted}>No expense data.</Text>
-                )}
               </Box>
 
               {/* Monthly Trend */}

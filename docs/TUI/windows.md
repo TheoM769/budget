@@ -172,8 +172,8 @@ Categories panel shows the full label hierarchy for reference while labeling.
 
 ### Layout
 
-Top section: two columns — metrics on the left, date picker fixed in the top-right corner.
-Bottom section: Sankey diagram full width, centered.
+Top section: two columns — metrics + monthly trend on the left, date picker fixed in the top-right corner.
+Bottom section: Sankey diagram full width.
 
 ```
 ╭─ ANALYTICS ────────────────────────────────────────── Esc: Back ─╮
@@ -184,23 +184,21 @@ Bottom section: Sankey diagram full width, centered.
 │  +€7 200   -€5 820    +€1 380          │ │              1   2  3 ││
 │  142 transactions                      │ │  4  5  6  7  8  9 10 ││
 │                                        │ │ 11 12 13 14 15 16 17 ││
-│  SPENDING BY LABEL                     │ │[18 19 20 21 22 23 24]││  ← active range
-│  Groceries   ████████████░░  -€580     │ │ 25 26 27 28 29 30 31 ││
-│  Restaurants ████████░░░░░░  -€320     │ │                      ││
-│  Rent        ██████░░░░░░░░  -€250     │ │ ← ↵:pick  r:reset  → ││
-│  Streaming   ████░░░░░░░░░░  -€140     │ │   []:month  esc:done  ││
+│  MONTHLY TREND                         │ │[18 19 20 21 22 23 24]││  ← active range
+│  2024-01  ↑ +€3 600  ↓ -€2 910  =+€690│ │ 25 26 27 28 29 30 31 ││
+│  2024-02  ↑ +€3 600  ↓ -€2 910  =+€690│ │                      ││
+│  2024-03  ↑ +€3 600  ↓ -€3 241  =+€359│ │ ← ↵:pick  r:reset  → ││
+│                                        │ │   []:month  esc:done  ││
 │                                        │ ╰──────────────────────╯│
-│  MONTHLY TREND                         │                          │
-│  2024-01  ↑ +€3 600  ↓ -€2 910  =+€690│                          │
-│  2024-02  ↑ +€3 600  ↓ -€2 910  =+€690│                          │
-│  2024-03  ↑ +€3 600  ↓ -€3 241  =+€359│                          │
 │ ──────────────────────────────────────────────────────────────── │
 │                         SANKEY FLOW                               │
 │              INCOME SOURCES        EXPENSES / SAVINGS             │
-│              Net salary  ████─────────────████░░  Food            │
-│              Bonuses      ██─────────────   ██░░  Housing         │
-│              Side inc.     █─────────────    █░░  Transport       │
-│                             ─────────────██████░  Savings         │
+│              Net salary  ████───────████░░  Food      -€580       │
+│              €3 600                                    €320       │
+│                                         ██░░  Housing   -€250     │
+│              Bonuses    ██─────────    ██░░  Transport -€140       │
+│              €800                                   █░░  Savings   │
+│                                        ████░░             +€690   │
 │ ──────────────────────────────────────────────────────────────── │
 │ d:focus date picker │ r:clear filter                              │
 ╰────────────────────────────────────────────────────────────────────╯
@@ -210,11 +208,12 @@ Date picker always rendered in the top-right corner. `d` shifts keyboard focus t
 
 ### Sankey diagram
 
-Left side split by income source (one band per label under Earnings). Right side split by expense category. Flow lines connect income bands to expense bands proportionally.
+Full-width diagram spanning the entire window width. Left side split by income source (one band per label under Earnings). Right side split by expense category. Flow lines connect income bands to expense bands proportionally.
 
 - Left band height proportional to income source amount
 - Right band height proportional to expense category amount
 - Each band distinct color from label tree or 10-color palette
+- Amount displayed at the base of each income band and to the right of each expense/savings band
 - Savings rendered as separate right band when total income > total expense
 
 ### Keybindings
