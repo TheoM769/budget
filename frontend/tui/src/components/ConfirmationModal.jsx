@@ -1,14 +1,15 @@
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { colors } from "../utils/theme.js";
+import React, { useState } from 'react';
+import { Box, Text, useInput } from 'ink';
+import { theme } from '../utils/theme.js';
 
 export default function ConfirmationModal({ message, onConfirm, onCancel }) {
-  const [selected, setSelected] = useState(false); // false = No, true = Yes
+  const [selected, setSelected] = useState(1); // 0=Yes, 1=No (default No)
 
-  useInput((ch, key) => {
-    if (key.leftArrow || key.rightArrow) setSelected((s) => !s);
+  useInput((input, key) => {
+    if (key.leftArrow) setSelected(0);
+    if (key.rightArrow) setSelected(1);
     if (key.return) {
-      if (selected) onConfirm();
+      if (selected === 0) onConfirm();
       else onCancel();
     }
     if (key.escape) onCancel();
@@ -18,25 +19,22 @@ export default function ConfirmationModal({ message, onConfirm, onCancel }) {
     <Box
       flexDirection="column"
       borderStyle="round"
-      borderColor={colors.warning}
-      paddingX={2}
-      paddingY={1}
+      borderColor={theme.warning}
+      paddingX={1}
     >
-      <Text bold color={colors.warning}>
-        {message}
-      </Text>
+      <Text color={theme.warning}>{message}</Text>
       <Box gap={2} marginTop={1}>
         <Text
-          color={selected ? colors.success : colors.textMuted}
-          bold={selected}
+          color={selected === 0 ? theme.warning : theme.textMuted}
+          bold={selected === 0}
         >
-          {selected ? "[Yes]" : " Yes "}
+          {selected === 0 ? '▸ ' : '  '}Yes
         </Text>
         <Text
-          color={!selected ? colors.danger : colors.textMuted}
-          bold={!selected}
+          color={selected === 1 ? theme.warning : theme.textMuted}
+          bold={selected === 1}
         >
-          {!selected ? "[No]" : " No "}
+          {selected === 1 ? '▸ ' : '  '}No
         </Text>
       </Box>
     </Box>

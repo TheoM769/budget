@@ -1,12 +1,7 @@
-import uuid
 from enum import IntEnum
 from typing import Optional
 
 from pydantic import BaseModel
-
-
-def _generate_id() -> str:
-    return uuid.uuid4().hex[:8]
 
 
 class Tier(IntEnum):
@@ -20,4 +15,4 @@ class Label(BaseModel):
     name: str
     tier: Tier
     parent_id: Optional[str] = None
-    color: Optional[str] = None  # only tier 2 labels have a color
+    color: Optional[str] = None  # only tier-2 labels carry a color

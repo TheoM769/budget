@@ -12,7 +12,7 @@ api: ## Start the FastAPI backend
 	uv run fastapi dev src/budget/api/app.py
 
 tui: ## Start the TUI (one-shot)
-	cd frontend/tui && npm start
+	cd frontend/tui && npx tsx src/cli.jsx
 
 # --- Dev mode ---
 

@@ -1,23 +1,19 @@
-import React from "react";
-import { Box, Text } from "ink";
+import React from 'react';
+import { Text } from 'ink';
+import { theme } from '../utils/theme.js';
 
-const LINES = [
-  " ██████╗ ██╗   ██╗██████╗  ██████╗ ███████╗████████╗",
-  " ██╔══██╗██║   ██║██╔══██╗██╔════╝ ██╔════╝╚══██╔══╝",
-  " ██████╔╝██║   ██║██║  ██║██║  ███╗█████╗     ██║   ",
-  " ██╔══██╗██║   ██║██║  ██║██║   ██║██╔══╝     ██║   ",
-  " ██████╔╝╚██████╔╝██████╔╝╚██████╔╝███████╗   ██║   ",
-  " ╚═════╝  ╚═════╝ ╚═════╝  ╚═════╝ ╚══════╝   ╚═╝   ",
-];
+const LOGO = `
+ ██████  ██    ██ ██████   ██████  ███████ ████████
+ ██   ██ ██    ██ ██   ██ ██       ██         ██
+ ██████  ██    ██ ██   ██ ██   ███ █████      ██
+ ██   ██ ██    ██ ██   ██ ██    ██ ██         ██
+ ██████   ██████  ██████   ██████  ███████    ██
+`.trimStart();
 
 export default function Logo() {
   return (
-    <Box flexDirection="column" alignItems="center">
-      {LINES.map((line, i) => (
-        <Text key={i} color="#555555">
-          {line}
-        </Text>
-      ))}
-    </Box>
+    <Text color={theme.primary} bold>
+      {LOGO}
+    </Text>
   );
 }

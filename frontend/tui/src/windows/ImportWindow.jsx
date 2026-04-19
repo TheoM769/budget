@@ -1,240 +1,187 @@
-import React, { useState, useEffect } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
-import Spinner from "ink-spinner";
-import Window from "../components/Window.jsx";
-import StatusBar from "../components/StatusBar.jsx";
-import { uploadTransactions } from "../utils/api.js";
-import { colors } from "../utils/theme.js";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import React, { useState, useEffect } from 'react';
+import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
+import Spinner from 'ink-spinner';
+import Window from '../components/Window.jsx';
+import { theme, amountColor } from '../utils/theme.js';
+import { api } from '../utils/api.js';
+import { formatAmount } from '../utils/formatting.js';
 
-function expandHome(p) {
-  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
+function expandPath(p) {
+  if (p.startsWith('~/')) {
+    return p.replace('~', process.env.HOME || '');
+  }
   return p;
 }
 
-function listCompletions(partial) {
-  const expanded = expandHome(partial);
-  const dir = partial.endsWith("/") ? expanded : path.dirname(expanded);
-  const prefix = partial.endsWith("/") ? "" : path.basename(expanded);
-
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    return entries
-      .filter((e) => e.name.startsWith(prefix) && !e.name.startsWith("."))
-      .slice(0, 10)
-      .map((e) => ({
-        name: e.name + (e.isDirectory() ? "/" : ""),
-        isDir: e.isDirectory(),
-        full: path.join(dir, e.name),
-      }));
-  } catch {
-    return [];
-  }
-}
-
-function displayPath(filePath) {
-  const home = os.homedir();
-  if (filePath.startsWith(home)) return "~" + filePath.slice(home.length);
-  return filePath;
-}
-
-const STAGES = { INPUT: "input", UPLOADING: "uploading", RESULT: "result" };
-
 export default function ImportWindow({ onClose }) {
-  const [input, setInput] = useState("@");
+  const [stage, setStage] = useState('INPUT'); // INPUT | UPLOADING | RESULT
+  const [inputValue, setInputValue] = useState('@data/');
   const [completions, setCompletions] = useState([]);
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [inputKey, setInputKey] = useState(0);
-  const [stage, setStage] = useState(STAGES.INPUT);
-  const [result, setResult] = useState(null);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [result, setResult] = useState([]);
   const [error, setError] = useState(null);
 
-  // Update completions whenever input changes
+  // Update completions when input changes
   useEffect(() => {
-    const atIdx = input.lastIndexOf("@");
-    if (atIdx === -1) {
-      setCompletions([]);
+    if (stage !== 'INPUT') return;
+    const raw = inputValue.startsWith('@') ? inputValue.slice(1) : inputValue;
+    if (!raw) { setCompletions([]); return; }
+
+    const expanded = expandPath(raw);
+    const doComplete = async () => {
+      try {
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+
+        let dir = expanded;
+        let prefix = '';
+        if (!expanded.endsWith('/')) {
+          dir = path.dirname(expanded);
+          prefix = path.basename(expanded).toLowerCase();
+        }
+
+        if (!fs.existsSync(dir)) { setCompletions([]); return; }
+
+        const entries = fs.readdirSync(dir, { withFileTypes: true })
+          .filter((e) => !prefix || e.name.toLowerCase().startsWith(prefix))
+          .slice(0, 10)
+          .map((e) => ({
+            name: e.name,
+            isDir: e.isDirectory(),
+            fullPath: path.join(dir, e.name),
+          }));
+        setCompletions(entries);
+        setSelectedIdx(0);
+      } catch {
+        setCompletions([]);
+      }
+    };
+    doComplete();
+  }, [inputValue, stage]);
+
+  useInput((input, key) => {
+    if (stage === 'RESULT') {
+      if (key.return || key.escape) onClose();
       return;
     }
-    const filePart = input.slice(atIdx + 1);
-    if (filePart.length === 0) {
-      // Show current directory contents
-      setCompletions(listCompletions("./"));
-    } else {
-      setCompletions(listCompletions(filePart));
-    }
-    setSelectedIndex(0);
-  }, [input]);
 
-  useInput((ch, key) => {
-    if (stage === STAGES.RESULT) {
-      if (key.escape || key.return) onClose();
-      return;
-    }
-    if (stage === STAGES.UPLOADING) return;
+    if (stage !== 'INPUT') return;
 
-    if (key.escape) {
-      onClose();
-      return;
-    }
+    if (key.escape) { onClose(); return; }
 
-    if (key.upArrow && completions.length > 0) {
-      setSelectedIndex((i) => Math.max(0, i - 1));
-    }
-    if (key.downArrow && completions.length > 0) {
-      setSelectedIndex((i) => Math.min(completions.length - 1, i + 1));
-    }
+    if (key.upArrow) setSelectedIdx((i) => Math.max(0, i - 1));
+    if (key.downArrow) setSelectedIdx((i) => Math.min(completions.length - 1, i + 1));
+
     if (key.tab && completions.length > 0) {
-      const chosen = completions[selectedIndex];
-      const atIdx = input.lastIndexOf("@");
-      const before = input.slice(0, atIdx + 1);
-      setInput(before + displayPath(chosen.full) + (chosen.isDir ? "/" : ""));
-      setInputKey((k) => k + 1);
+      const sel = completions[Math.min(selectedIdx, completions.length - 1)];
+      const raw = inputValue.startsWith('@') ? inputValue.slice(1) : inputValue;
+      const lastSlash = raw.lastIndexOf('/');
+      const dir = lastSlash >= 0 ? raw.slice(0, lastSlash + 1) : '';
+      const newVal = '@' + dir + sel.name + (sel.isDir ? '/' : '');
+      setInputValue(newVal);
+    }
+
+    if (key.return) {
+      const raw = inputValue.startsWith('@') ? inputValue.slice(1) : inputValue;
+      const filePath = expandPath(raw);
+      setStage('UPLOADING');
+      api.uploadTransactions(filePath)
+        .then((data) => {
+          setResult(data);
+          setStage('RESULT');
+        })
+        .catch((e) => {
+          setError(e.message);
+          setStage('RESULT');
+        });
     }
   });
 
-  const handleSubmit = async () => {
-    const atIdx = input.lastIndexOf("@");
-    if (atIdx === -1) return;
-
-    const filePath = expandHome(input.slice(atIdx + 1).trim());
-    if (!filePath || !fs.existsSync(filePath)) {
-      setError("File not found: " + filePath);
-      return;
-    }
-    if (fs.statSync(filePath).isDirectory()) {
-      setError("Path is a directory, not a file");
-      return;
-    }
-
-    setStage(STAGES.UPLOADING);
-    setError(null);
-    try {
-      const data = await uploadTransactions(filePath);
-      setResult(data);
-      setStage(STAGES.RESULT);
-    } catch (e) {
-      setError(e.message);
-      setStage(STAGES.INPUT);
-    }
-  };
-
-  const footer =
-    stage === STAGES.INPUT
-      ? "Tab:complete │ ↑↓:navigate │ Enter:import │ Esc:back"
-      : stage === STAGES.RESULT
-        ? "Enter/Esc:close"
-        : "";
-
-  return (
-    <Window title="IMPORT TRANSACTIONS" footer={footer}>
-      {stage === STAGES.INPUT && (
-        <Box flexDirection="column">
-          <Box marginBottom={1}>
-            <Text color={colors.text}>
-              Type <Text bold color={colors.primary}>@</Text> followed by a file
-              path. Use <Text bold>Tab</Text> to autocomplete.
-            </Text>
-          </Box>
-
-          <Box>
-            <Text color={colors.primary} bold>
-              {">"}{" "}
-            </Text>
-            <TextInput
-              key={inputKey}
-              value={input}
-              onChange={setInput}
-              onSubmit={handleSubmit}
-              placeholder="@path/to/file.csv"
-            />
-          </Box>
-
-          {completions.length > 0 && (
-            <Box
-              flexDirection="column"
-              borderStyle="single"
-              borderColor={colors.textMuted}
-              paddingX={1}
-              marginTop={1}
-            >
-              {completions.map((c, i) => (
-                <Box key={c.name} gap={2}>
-                  <Text
-                    color={
-                      i === selectedIndex
-                        ? colors.primary
-                        : c.isDir
-                          ? colors.warning
-                          : colors.text
-                    }
-                    bold={i === selectedIndex}
-                  >
-                    {i === selectedIndex ? "▸" : " "}{" "}
-                    {c.isDir ? "📁" : "📄"} {c.name}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-          )}
-        </Box>
-      )}
-
-      {stage === STAGES.UPLOADING && (
+  if (stage === 'UPLOADING') {
+    return (
+      <Window title="IMPORT TRANSACTIONS">
         <Box>
-          <Text color={colors.warning}>
-            <Spinner type="dots" />{" "}
+          <Text color={theme.warning}>
+            <Spinner type="dots" /> Uploading...
           </Text>
-          <Text color={colors.text}>Importing transactions...</Text>
         </Box>
-      )}
+      </Window>
+    );
+  }
 
-      {stage === STAGES.RESULT && result && (
-        <Box flexDirection="column">
-          <Box marginBottom={1}>
-            <Text color={colors.success} bold>
+  if (stage === 'RESULT') {
+    const preview = result.slice(0, 15);
+    const remaining = result.length - 15;
+    return (
+      <Window title="IMPORT TRANSACTIONS" footer="Enter/Esc:close">
+        {error ? (
+          <Text color={theme.danger}>{error}</Text>
+        ) : (
+          <Box flexDirection="column">
+            <Text color={theme.success}>
               Imported {result.length} new transaction(s)
             </Text>
-          </Box>
-
-          {result.length > 0 && (
-            <Box flexDirection="column">
-              <Box gap={1}>
-                <Text bold color={colors.textMuted}>
-                  {"Date".padEnd(12)}
-                  {"Description".padEnd(35)}
-                  {"Amount".padStart(12)}
-                </Text>
+            <Box marginTop={1} flexDirection="column">
+              <Box gap={2}>
+                <Box width={12}><Text bold color={theme.textMuted}>Date</Text></Box>
+                <Box width={40}><Text bold color={theme.textMuted}>Description</Text></Box>
+                <Box width={14}><Text bold color={theme.textMuted}>Amount</Text></Box>
               </Box>
-              {result.slice(0, 15).map((tx) => (
-                <Box key={tx.id} gap={1}>
-                  <Text color={colors.text}>
-                    {tx.date.padEnd(12)}
-                    {(tx.description || "").slice(0, 33).padEnd(35)}
-                  </Text>
-                  <Text
-                    color={tx.amount >= 0 ? colors.success : colors.danger}
-                  >
-                    {(tx.amount >= 0 ? "+" : "") +
-                      tx.amount.toFixed(2).padStart(11) +
-                      "€"}
-                  </Text>
+              {preview.map((tx) => (
+                <Box key={tx.id} gap={2}>
+                  <Box width={12}><Text color={theme.textMuted}>{tx.date}</Text></Box>
+                  <Box width={40}><Text>{tx.description}</Text></Box>
+                  <Box width={14}>
+                    <Text color={amountColor(tx.amount)}>{formatAmount(tx.amount)}</Text>
+                  </Box>
                 </Box>
               ))}
-              {result.length > 15 && (
-                <Text color={colors.textMuted}>
-                  ... and {result.length - 15} more
-                </Text>
+              {remaining > 0 && (
+                <Text color={theme.textMuted}>... and {remaining} more</Text>
               )}
             </Box>
-          )}
+          </Box>
+        )}
+      </Window>
+    );
+  }
+
+  // INPUT stage
+  return (
+    <Window
+      title="IMPORT TRANSACTIONS"
+      footer="Tab:complete │ ↑↓:navigate │ Enter:import │ Esc:back"
+    >
+      <Text color={theme.textMuted}>
+        Type @ followed by a file path. Use Tab to autocomplete.
+      </Text>
+      <Box marginTop={1}>
+        <Text color={theme.primary}>{'> '}</Text>
+        <TextInput value={inputValue} onChange={setInputValue} />
+      </Box>
+
+      {completions.length > 0 && (
+        <Box
+          flexDirection="column"
+          marginTop={1}
+          borderStyle="single"
+          borderColor={theme.textMuted}
+          paddingX={1}
+        >
+          {completions.map((entry, i) => (
+            <Box key={entry.name} gap={1}>
+              <Text color={i === selectedIdx ? theme.primary : theme.textMuted}>
+                {i === selectedIdx ? '▸' : ' '}
+              </Text>
+              <Text color={entry.isDir ? theme.warning : theme.text}>
+                {entry.isDir ? '📁 ' : '📄 '}
+                {entry.name}{entry.isDir ? '/' : ''}
+              </Text>
+            </Box>
+          ))}
         </Box>
       )}
-
-      {error && <StatusBar message={error} type="error" />}
     </Window>
   );
 }

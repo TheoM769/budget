@@ -3,22 +3,21 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from ..models import Transaction
+from ..models.transaction import Transaction
 
 
 class TransactionStore(ABC):
     @abstractmethod
     def read(self) -> list[Transaction]:
-        pass
+        """Return all persisted transactions."""
 
     @abstractmethod
     def write(self, transactions: list[Transaction]) -> list[Transaction]:
-        pass
+        """Persist transactions. Skip duplicates. Return newly written records."""
 
     @abstractmethod
     def remove(self, ids: str | list[str]) -> list[Transaction]:
-        """Remove transactions by id(s). Returns the removed transactions."""
-        pass
+        """Delete by id. Return removed records."""
 
     @abstractmethod
     def modify(
@@ -27,7 +26,7 @@ class TransactionStore(ABC):
         description: Optional[str] = None,
         label: Optional[str] = None,
     ) -> list[Transaction]:
-        """Modify description and/or label for transaction(s) by id(s).
-        The label parameter accepts a label *name* which is resolved to its id internally.
-        Returns the modified transactions."""
-        pass
+        """Update description and/or label on matching transactions.
+        label is a label name resolved to id internally.
+        Raise ValueError if label name does not exist.
+        Return modified records."""

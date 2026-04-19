@@ -50,7 +50,6 @@ class TransactionFilter(BaseModel):
                 AmountOp.le: lambda a: a <= val,
                 AmountOp.eq: lambda a: a == val,
             }
-            check = ops[op]
-            result = [tx for tx in result if check(tx.amount)]
+            result = [tx for tx in result if ops[op](tx.amount)]
 
         return result

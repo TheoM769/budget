@@ -1,46 +1,43 @@
-import React from "react";
-import { Box, Text, useStdout } from "ink";
-import { colors } from "../utils/theme.js";
+import React from 'react';
+import { Box, Text, useStdout } from 'ink';
+import { theme } from '../utils/theme.js';
 
 export default function Window({ title, footer, children }) {
   const { stdout } = useStdout();
-  const termWidth = stdout?.columns || 80;
-  const termRows = stdout?.rows || 24;
-  // reserve 1 row for BottomBar
-  const innerWidth = Math.max(20, termWidth - 4);
+  const height = (stdout?.rows || 24) - 1;
 
   return (
     <Box
       flexDirection="column"
+      height={height}
       borderStyle="round"
-      borderColor={colors.primary}
-      width={termWidth}
-      height={termRows - 1}
+      borderColor={theme.primary}
+      paddingX={1}
     >
-      {/* Header */}
-      <Box paddingX={1} justifyContent="space-between">
-        <Text bold color={colors.primary}>{title}</Text>
-        <Text color={colors.textMuted}>Esc: Back</Text>
+      {/* Title bar */}
+      <Box>
+        <Text bold color={theme.primary}>
+          {title}
+        </Text>
+        <Box flexGrow={1} />
+        <Text color={theme.textMuted}>Esc: Back</Text>
       </Box>
 
-      <Box paddingX={1}>
-        <Text color={colors.textMuted}>{"─".repeat(innerWidth)}</Text>
-      </Box>
+      {/* Top rule */}
+      <Text color={theme.textMuted}>{'─'.repeat(stdout?.columns ? stdout.columns - 6 : 70)}</Text>
 
-      {/* Content */}
-      <Box flexDirection="column" paddingX={1} flexGrow={1}>
+      {/* Content area */}
+      <Box flexDirection="column" flexGrow={1}>
         {children}
       </Box>
 
       {/* Footer */}
       {footer && (
         <>
-          <Box paddingX={1}>
-            <Text color={colors.textMuted}>{"─".repeat(innerWidth)}</Text>
-          </Box>
-          <Box paddingX={1}>
-            <Text color={colors.textMuted}>{footer}</Text>
-          </Box>
+          <Text color={theme.textMuted}>
+            {'─'.repeat(stdout?.columns ? stdout.columns - 6 : 70)}
+          </Text>
+          <Text color={theme.textMuted}>{footer}</Text>
         </>
       )}
     </Box>

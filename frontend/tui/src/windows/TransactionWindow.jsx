@@ -1,315 +1,253 @@
-import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
-import TextInput from "ink-text-input";
-import Window from "../components/Window.jsx";
-import ConfirmationModal from "../components/ConfirmationModal.jsx";
-import StatusBar from "../components/StatusBar.jsx";
-import RuleForm from "../components/RuleForm.jsx";
-import { getTransactions, removeTransactions, modifyTransactions, getLabelTree, createRule } from "../utils/api.js";
-import { formatCurrency, truncate } from "../utils/formatting.js";
-import { colors, amountColor } from "../utils/theme.js";
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
+import Window from '../components/Window.jsx';
+import ConfirmationModal from '../components/ConfirmationModal.jsx';
+import RuleForm from '../components/RuleForm.jsx';
+import StatusBar from '../components/StatusBar.jsx';
+import { theme, amountColor } from '../utils/theme.js';
+import { api } from '../utils/api.js';
+import { formatAmount, truncate } from '../utils/formatting.js';
 
-const MODES = { LIST: "list", ADD: "add", EDIT: "edit", LABEL: "label", RULE: "rule" };
 const PAGE_SIZE = 15;
 
-export default function TransactionWindow({ onClose, labels }) {
+export default function TransactionWindow({ onClose, cols }) {
   const [transactions, setTransactions] = useState([]);
   const [cursor, setCursor] = useState(0);
+  const [page, setPage] = useState(0);
   const [selected, setSelected] = useState(new Set());
-  const [mode, setMode] = useState(MODES.LIST);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [mode, setMode] = useState('LIST'); // LIST | EDIT | LABEL | RULE | FILTER | DELETE
+  const [editValue, setEditValue] = useState('');
+  const [filterValue, setFilterValue] = useState('');
+  const [filterActive, setFilterActive] = useState('');
   const [status, setStatus] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [editField, setEditField] = useState("");
-  const [labelInput, setLabelInput] = useState("");
-  const [filterDesc, setFilterDesc] = useState("");
-  const [showFilter, setShowFilter] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [flat, setFlat] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const fetchData = async (descFilter) => {
+  const fetchData = async () => {
     setLoading(true);
-    setError(null);
     try {
-      const filters = {};
-      if (descFilter) filters.description = descFilter;
-      const [data, tree] = await Promise.all([getTransactions(filters), getLabelTree()]);
+      const params = filterActive ? { description: filterActive } : {};
+      const data = await api.listTransactions(params);
       setTransactions(data);
-      const f = [];
-      for (const t1 of tree)
-        for (const t2 of t1.categories || [])
-          for (const t3 of t2.labels || [])
-            f.push({ ...t3, category: t2.name, group: t1.name });
-      setFlat(f);
     } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      setStatus({ message: e.message, type: 'error' });
     }
+    setLoading(false);
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, [filterActive]);
 
-  const { stdout } = useStdout();
-  const termWidth = stdout?.columns || 80;
-  // Available width: terminal - border(2) - paddingX(2) - row gaps/markers(4)
-  const contentWidth = Math.max(40, termWidth - 8);
-  // Fixed columns: marker(2) + date(12) + amount(14) + gap(2) + label min(10)
-  const fixedWidth = 2 + 12 + 14 + 2;
-  // Description gets the remaining space, with a minimum of 15
-  const descWidth = Math.max(15, Math.floor((contentWidth - fixedWidth) * 0.6));
-  const labelWidth = Math.max(10, contentWidth - fixedWidth - descWidth);
+  const totalPages = Math.max(1, Math.ceil(transactions.length / PAGE_SIZE));
+  const pageItems = transactions.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const currentTx = pageItems[cursor];
 
-  const visible = transactions.slice(offset, offset + PAGE_SIZE);
+  // Column widths
+  const innerWidth = (cols || 80) - 6; // border + padding
+  const fixedWidth = 2 + 12 + 14; // marker + date + amount
+  const remaining = Math.max(30, innerWidth - fixedWidth);
+  const descWidth = Math.max(15, Math.floor(remaining * 0.6));
+  const labelWidth = Math.max(10, remaining - descWidth);
 
-  useInput((ch, key) => {
-    if (confirmDelete || mode !== MODES.LIST) return;
-    if (showFilter) {
+  useInput((input, key) => {
+    if (mode === 'DELETE' || mode === 'RULE') return;
+
+    if (mode === 'EDIT') {
+      if (key.return) {
+        if (currentTx && editValue.trim()) {
+          api.modifyTransactions(currentTx.id, { description: editValue.trim() })
+            .then(() => { setStatus({ message: 'Updated', type: 'success' }); fetchData(); })
+            .catch((e) => setStatus({ message: e.message, type: 'error' }));
+        }
+        setMode('LIST');
+      }
+      if (key.escape) setMode('LIST');
+      return;
+    }
+
+    if (mode === 'LABEL') {
+      if (key.return) {
+        const ids = selected.size > 0 ? [...selected] : currentTx ? [currentTx.id] : [];
+        if (ids.length && editValue.trim()) {
+          api.modifyTransactions(ids, { label: editValue.trim() })
+            .then(() => {
+              setStatus({ message: `Labeled ${ids.length} transaction(s)`, type: 'success' });
+              setSelected(new Set());
+              fetchData();
+            })
+            .catch((e) => setStatus({ message: e.message, type: 'error' }));
+        }
+        setMode('LIST');
+      }
+      if (key.escape) setMode('LIST');
+      return;
+    }
+
+    if (mode === 'FILTER') {
+      if (key.return) {
+        setFilterActive(filterValue);
+        setPage(0);
+        setCursor(0);
+        setMode('LIST');
+      }
       if (key.escape) {
-        setShowFilter(false);
-        setFilterDesc("");
+        setFilterValue('');
+        setFilterActive('');
+        setMode('LIST');
       }
       return;
     }
 
-    if (key.escape) {
-      onClose();
-      return;
-    }
-
-    // Navigation
+    // LIST mode
+    if (key.escape) { onClose(); return; }
     if (key.upArrow) setCursor((c) => Math.max(0, c - 1));
-    if (key.downArrow) setCursor((c) => Math.min(visible.length - 1, c + 1));
+    if (key.downArrow) setCursor((c) => Math.min(pageItems.length - 1, c + 1));
 
-    // Pagination
-    if (ch === "n" && offset + PAGE_SIZE < transactions.length) {
-      setOffset((o) => o + PAGE_SIZE);
-      setCursor(0);
+    if (input === 'n') {
+      if (page < totalPages - 1) { setPage((p) => p + 1); setCursor(0); }
     }
-    if (ch === "p" && offset > 0) {
-      setOffset((o) => Math.max(0, o - PAGE_SIZE));
-      setCursor(0);
+    if (input === 'p') {
+      if (page > 0) { setPage((p) => p - 1); setCursor(0); }
     }
-
-    // Selection
-    if (ch === " ") {
-      const tx = visible[cursor];
-      if (tx) {
-        setSelected((prev) => {
-          const next = new Set(prev);
-          if (next.has(tx.id)) next.delete(tx.id);
-          else next.add(tx.id);
-          return next;
-        });
-      }
+    if (input === ' ' && currentTx) {
+      setSelected((s) => {
+        const next = new Set(s);
+        if (next.has(currentTx.id)) next.delete(currentTx.id);
+        else next.add(currentTx.id);
+        return next;
+      });
     }
-
-    // Actions
-    if (ch === "d") {
-      const targets = selected.size > 0 ? selected : visible[cursor] ? new Set([visible[cursor].id]) : new Set();
-      if (targets.size > 0) {
-        setSelected(targets);
-        setConfirmDelete(true);
-      }
+    if (input === 'e' && currentTx) {
+      setEditValue(currentTx.description);
+      setMode('EDIT');
     }
-
-    if (ch === "e" && visible[cursor]) {
-      setMode(MODES.EDIT);
-      setEditField(visible[cursor].description);
+    if (input === 'l') {
+      setEditValue('');
+      setMode('LABEL');
     }
-
-    if (ch === "l" && visible[cursor]) {
-      setMode(MODES.LABEL);
-      setLabelInput(visible[cursor].label_id || "");
+    if (input === 'd') {
+      if (currentTx || selected.size > 0) setMode('DELETE');
     }
-
-    if (ch === "c") {
-      setMode(MODES.RULE);
+    if (input === 'c' && currentTx) setMode('RULE');
+    if (input === 'f') {
+      setFilterValue(filterActive);
+      setMode('FILTER');
     }
-
-    if (ch === "f") {
-      setShowFilter(true);
-    }
-
-    if (ch === "r") {
-      fetchData(filterDesc || undefined);
-    }
+    if (input === 'r') fetchData();
   });
 
-  const handleRuleSubmit = async (pattern, labelId) => {
-    try {
-      const result = await createRule(pattern, labelId);
-      const applied = result.applied ?? 0;
-      setStatus({
-        message: `Rule created — ${applied} transaction${applied !== 1 ? "s" : ""} labeled`,
-        type: "success",
-      });
-      await fetchData(filterDesc || undefined);
-    } catch (e) {
-      setStatus({ message: e.message, type: "error" });
-    }
-    setMode(MODES.LIST);
+  const handleDelete = () => {
+    const ids = selected.size > 0 ? [...selected] : currentTx ? [currentTx.id] : [];
+    api.removeTransactions(ids)
+      .then(() => {
+        setStatus({ message: `Deleted ${ids.length} transaction(s)`, type: 'success' });
+        setSelected(new Set());
+        fetchData();
+      })
+      .catch((e) => setStatus({ message: e.message, type: 'error' }));
+    setMode('LIST');
   };
 
-  const handleDelete = async () => {
-    try {
-      await removeTransactions([...selected]);
-      setStatus({ message: `Deleted ${selected.size} transaction(s)`, type: "success" });
-      setSelected(new Set());
-      setCursor(0);
-      await fetchData(filterDesc || undefined);
-    } catch (e) {
-      setStatus({ message: e.message, type: "error" });
-    }
-    setConfirmDelete(false);
+  const handleRuleSubmit = (pattern, labelId) => {
+    api.createRule(pattern, labelId)
+      .then((res) => {
+        setStatus({ message: `Rule created, applied to ${res.applied} transaction(s)`, type: 'success' });
+        fetchData();
+      })
+      .catch((e) => setStatus({ message: e.message, type: 'error' }));
+    setMode('LIST');
   };
 
-  const handleEditSubmit = async () => {
-    const tx = visible[cursor];
-    if (!tx) return;
-    try {
-      await modifyTransactions(tx.id, { description: editField });
-      setStatus({ message: "Transaction updated", type: "success" });
-      await fetchData(filterDesc || undefined);
-    } catch (e) {
-      setStatus({ message: e.message, type: "error" });
-    }
-    setMode(MODES.LIST);
-  };
-
-  const handleLabelSubmit = async () => {
-    const ids = selected.size > 0 ? [...selected] : [visible[cursor]?.id].filter(Boolean);
-    if (ids.length === 0) return;
-    try {
-      await modifyTransactions(ids, { label: labelInput });
-      setStatus({ message: `Labeled ${ids.length} transaction(s)`, type: "success" });
-      setSelected(new Set());
-      await fetchData(filterDesc || undefined);
-    } catch (e) {
-      setStatus({ message: e.message, type: "error" });
-    }
-    setMode(MODES.LIST);
-  };
-
-  const handleFilterSubmit = () => {
-    setShowFilter(false);
-    setOffset(0);
-    setCursor(0);
-    fetchData(filterDesc || undefined);
-  };
-
-  const footer = "↑↓:nav │ Space:select │ d:delete │ e:edit │ l:label │ c:rule │ f:filter │ r:refresh │ n/p:page │ Esc:back";
+  const footer = '↑↓:nav │ Space:select │ d:delete │ e:edit │ l:label │ f:filter';
 
   return (
     <Window title={`TRANSACTIONS (${transactions.length})`} footer={footer}>
-      {loading && <Text color={colors.warning}>Loading transactions...</Text>}
-      {error && <Text color={colors.danger}>Error: {error}</Text>}
-
-      {showFilter && (
+      {/* Filter bar */}
+      {mode === 'FILTER' && (
         <Box marginBottom={1}>
-          <Text color={colors.primary}>Filter by description: </Text>
-          <TextInput
-            value={filterDesc}
-            onChange={setFilterDesc}
-            onSubmit={handleFilterSubmit}
-            placeholder="regex pattern..."
-          />
+          <Text color={theme.primary}>Filter: </Text>
+          <TextInput value={filterValue} onChange={setFilterValue} />
         </Box>
       )}
 
-      {confirmDelete && (
-        <ConfirmationModal
-          message={`Delete ${selected.size} transaction(s)?`}
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmDelete(false)}
-        />
-      )}
+      {/* Column headers */}
+      <Box>
+        <Box width={2}><Text> </Text></Box>
+        <Box width={12}><Text bold color={theme.textMuted}>Date</Text></Box>
+        <Box width={descWidth}><Text bold color={theme.textMuted}>Description</Text></Box>
+        <Box width={14}><Text bold color={theme.textMuted}>Amount</Text></Box>
+        <Box width={labelWidth}><Text bold color={theme.textMuted}>Label</Text></Box>
+      </Box>
 
-      {mode === MODES.EDIT && (
-        <Box marginBottom={1} flexDirection="column">
-          <Text color={colors.primary} bold>Edit description:</Text>
-          <TextInput
-            value={editField}
-            onChange={setEditField}
-            onSubmit={handleEditSubmit}
-          />
-        </Box>
-      )}
-
-      {mode === MODES.LABEL && (
-        <Box marginBottom={1} flexDirection="column">
-          <Text color={colors.primary} bold>Set label (ID or name):</Text>
-          <TextInput
-            value={labelInput}
-            onChange={setLabelInput}
-            onSubmit={handleLabelSubmit}
-          />
-        </Box>
-      )}
-
-      {mode === MODES.RULE && (
-        <Box marginBottom={1}>
-          <RuleForm
-            flat={flat}
-            defaultPattern={visible[cursor]?.description.toUpperCase().split(/\s+/).find((w) => w.length >= 3) ?? ""}
-            onSubmit={handleRuleSubmit}
-            onCancel={() => setMode(MODES.LIST)}
-          />
-        </Box>
-      )}
-
-      {!loading && mode === MODES.LIST && !confirmDelete && (
-        <Box flexDirection="column">
-          {/* Header row */}
-          <Box>
-            <Text bold color={colors.textMuted}>
-              {"  "}
-              {"Date".padEnd(12)}
-              {truncate("Description", descWidth - 2).padEnd(descWidth)}
-              {"Amount".padStart(14)}
-              {"  "}
-              {"Label".padEnd(labelWidth)}
-            </Text>
-          </Box>
-
-          {visible.map((tx, i) => {
-            const isSelected = selected.has(tx.id);
+      {loading ? (
+        <Text color={theme.warning}>Loading...</Text>
+      ) : (
+        <Box flexDirection="column" flexGrow={1}>
+          {pageItems.map((tx, i) => {
             const isCursor = i === cursor;
+            const isSel = selected.has(tx.id);
             return (
               <Box key={tx.id}>
-                <Text color={isCursor ? colors.primary : colors.text}>
-                  {isCursor ? "▸" : " "}
-                  {isSelected ? "●" : " "}
-                  {tx.date.padEnd(12)}
-                  {truncate(tx.description, descWidth - 2).padEnd(descWidth)}
-                </Text>
-                <Text color={amountColor(tx.amount)}>
-                  {formatCurrency(tx.amount).padStart(14)}
-                </Text>
-                <Text color={colors.textMuted}>
-                  {"  "}
-                  {truncate(tx.label_id || "—", labelWidth).padEnd(labelWidth)}
-                </Text>
+                <Box width={2}>
+                  <Text color={theme.primary}>
+                    {isCursor ? '▸' : ' '}{isSel ? '●' : ' '}
+                  </Text>
+                </Box>
+                <Box width={12}>
+                  <Text color={isCursor ? theme.primary : theme.textMuted}>{tx.date}</Text>
+                </Box>
+                <Box width={descWidth}>
+                  {mode === 'EDIT' && isCursor ? (
+                    <TextInput value={editValue} onChange={setEditValue} />
+                  ) : (
+                    <Text color={isCursor ? theme.primary : theme.text}>
+                      {truncate(tx.description, descWidth)}
+                    </Text>
+                  )}
+                </Box>
+                <Box width={14}>
+                  <Text color={amountColor(tx.amount)}>{formatAmount(tx.amount)}</Text>
+                </Box>
+                <Box width={labelWidth}>
+                  {mode === 'LABEL' && isCursor ? (
+                    <TextInput value={editValue} onChange={setEditValue} />
+                  ) : (
+                    <Text color={theme.textMuted}>
+                      {truncate(tx.label_id, labelWidth)}
+                    </Text>
+                  )}
+                </Box>
               </Box>
             );
           })}
 
-          {transactions.length > PAGE_SIZE && (
-            <Box marginTop={1}>
-              <Text color={colors.textMuted}>
-                Page {Math.floor(offset / PAGE_SIZE) + 1}/
-                {Math.ceil(transactions.length / PAGE_SIZE)} │{" "}
-                {selected.size > 0 && `${selected.size} selected`}
-              </Text>
-            </Box>
-          )}
+          {/* Page info */}
+          <Box marginTop={1}>
+            <Text color={theme.textMuted}>
+              Page {page + 1}/{totalPages}
+              {selected.size > 0 ? ` │ ${selected.size} selected` : ''}
+            </Text>
+          </Box>
         </Box>
       )}
 
-      {status && <StatusBar message={status.message} type={status.type} />}
+      {/* Overlays */}
+      {mode === 'DELETE' && (
+        <ConfirmationModal
+          message={`Delete ${selected.size || 1} transaction(s)?`}
+          onConfirm={handleDelete}
+          onCancel={() => setMode('LIST')}
+        />
+      )}
+
+      {mode === 'RULE' && currentTx && (
+        <RuleForm
+          transaction={currentTx}
+          onSubmit={handleRuleSubmit}
+          onCancel={() => setMode('LIST')}
+        />
+      )}
+
+      <StatusBar message={status?.message} type={status?.type} />
     </Window>
   );
 }

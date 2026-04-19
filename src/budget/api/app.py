@@ -1,190 +1,215 @@
 from datetime import date
-from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from fastapi import HTTPException
+from ..backend.models import (
+    AmountFilter,
+    AmountOp,
+    Label,
+    ModifyRequest,
+    RemoveRequest,
+    Rule,
+    Transaction,
+    TransactionFilter,
+)
+from ..backend.services.rule_engine import RuleEngine
+from ..backend.services.transaction_manager import TransactionManager
 
-from ..adapters.csv_transaction_reader import CsvTransactionReader
-from ..adapters.tsv_label_store import TsvLabelStore
-from ..adapters.tsv_rule_store import TsvRuleStore
-from ..adapters.tsv_transaction_store import TsvTransactionStore
-from ..models import AmountFilter, AmountOp, TransactionFilter
-from ..models import ModifyRequest, RemoveRequest
-from ..models.label import Tier
+from pathlib import Path
+
+from ..backend.adapters.csv_transaction_reader import CsvTransactionReader
+from ..backend.adapters.tsv_label_store import TsvLabelStore
+from ..backend.adapters.tsv_rule_store import TsvRuleStore
+from ..backend.adapters.tsv_transaction_store import TsvTransactionStore
 
 app = FastAPI()
 
+# --- Wire concrete implementations at module level ---
 STORAGE_DIR = Path(__file__).resolve().parents[3] / "storage"
+
 label_store = TsvLabelStore(STORAGE_DIR / "labels.tsv")
-store = TsvTransactionStore(STORAGE_DIR / "transactions.tsv", label_store)
-rule_store = TsvRuleStore(STORAGE_DIR / "rules.tsv", label_store, store)
-reader = CsvTransactionReader()
+_tx_store = TsvTransactionStore(STORAGE_DIR / "transactions.tsv", label_store)
+_rl_store = TsvRuleStore(STORAGE_DIR / "rules.tsv", label_store, _tx_store)
+_reader = CsvTransactionReader()
+
+tx_manager = TransactionManager(_reader, _tx_store)
+rule_engine = RuleEngine(_rl_store, _tx_store)
+tx_manager.rule_engine = rule_engine
+
+
+# ── Transaction Endpoints ────────────────────────────────────────────
 
 
 @app.post("/transactions/upload")
-async def upload_transactions(file: UploadFile):
+async def upload_transactions(file: UploadFile) -> list[Transaction]:
     raw = await file.read()
-    try:
-        content = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        content = raw.decode("latin-1")
-    transactions = reader.read_transactions(content)
-    new = store.write(transactions)
-    # Apply existing rules to newly imported transactions
-    rule_store.apply(new)
-    return [tx.model_dump(mode="json") for tx in new]
+    for encoding in ("utf-8", "latin-1"):
+        try:
+            content = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise HTTPException(400, "Unable to decode file")
+    return tx_manager.import_transactions(content)
 
 
 @app.get("/transactions")
-async def read_transactions(
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    description: Optional[str] = Query(None),
-    amount_op: Optional[AmountOp] = Query(None),
-    amount_value: Optional[float] = Query(None),
-):
-    transactions = store.read()
-
+def list_transactions(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    description: Optional[str] = None,
+    amount_op: Optional[AmountOp] = None,
+    amount_value: Optional[float] = None,
+) -> list[Transaction]:
     amount = None
     if amount_op is not None and amount_value is not None:
         amount = AmountFilter(op=amount_op, value=amount_value)
+    elif (amount_op is None) != (amount_value is None):
+        raise HTTPException(400, "amount_op and amount_value must both be provided or both omitted")
 
-    tx_filter = TransactionFilter(
+    filters = TransactionFilter(
         date_from=date_from,
         date_to=date_to,
         description=description,
         amount=amount,
     )
-    filtered = tx_filter.apply(transactions)
-
-    return [tx.model_dump(mode="json") for tx in filtered]
-
-
-@app.post("/transactions/remove")
-async def remove_transactions(body: RemoveRequest):
-    removed = store.remove(body.ids)
-    return [tx.model_dump(mode="json") for tx in removed]
+    return tx_manager.list(filters)
 
 
 @app.post("/transactions/modify")
-async def modify_transactions(body: ModifyRequest):
+def modify_transactions(body: ModifyRequest) -> list[Transaction]:
     try:
-        modified = store.modify(body.ids, description=body.description, label=body.label)
+        return tx_manager.modify(body.ids, description=body.description, label=body.label)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return [tx.model_dump(mode="json") for tx in modified]
+        raise HTTPException(400, str(e))
 
 
-# --- Label endpoints ---
+@app.post("/transactions/remove")
+def remove_transactions(body: RemoveRequest) -> list[Transaction]:
+    return tx_manager.remove(body.ids)
+
+
+# ── Label Endpoints ──────────────────────────────────────────────────
+
+
+@app.get("/labels")
+def list_labels(tier: Optional[int] = None) -> list[Label]:
+    from ..backend.models.label import Tier
+
+    t = Tier(tier) if tier is not None else None
+    return label_store.list(t)
+
+
+class LabelTreeCategory(BaseModel):
+    id: str
+    name: str
+    color: Optional[str]
+    labels: list[dict]
+
+
+class LabelTreeGroup(BaseModel):
+    id: str
+    name: str
+    categories: list[LabelTreeCategory]
+
+
+@app.get("/labels/tree")
+def label_tree() -> list[LabelTreeGroup]:
+    from ..backend.models.label import Tier
+
+    all_labels = label_store.list()
+    groups = [lb for lb in all_labels if lb.tier == Tier.ONE]
+    categories = [lb for lb in all_labels if lb.tier == Tier.TWO]
+    leaves = [lb for lb in all_labels if lb.tier == Tier.THREE]
+
+    tree = []
+    for g in groups:
+        cats = []
+        for c in categories:
+            if c.parent_id == g.id:
+                cat_labels = [
+                    {"id": lb.id, "name": lb.name}
+                    for lb in leaves
+                    if lb.parent_id == c.id
+                ]
+                cats.append(LabelTreeCategory(
+                    id=c.id, name=c.name, color=c.color, labels=cat_labels,
+                ))
+        tree.append(LabelTreeGroup(id=g.id, name=g.name, categories=cats))
+    return tree
 
 
 class CreateLabelRequest(BaseModel):
     name: str
-    parent_id: str  # must be a tier-2 label id
-
-
-class ModifyLabelRequest(BaseModel):
-    new_name: Optional[str] = None
-
-
-@app.get("/labels")
-async def list_labels(tier: Optional[int] = Query(None)):
-    """List labels, optionally filtered by tier (1, 2, or 3)."""
-    t = Tier(tier) if tier is not None else None
-    return [lb.model_dump() for lb in label_store.list(tier=t)]
-
-
-@app.get("/labels/tree")
-async def label_tree():
-    """Return the full label hierarchy as a nested tree."""
-    all_labels = label_store.list()
-    by_id = {lb.id: lb for lb in all_labels}
-
-    tree = []
-    for t1 in (lb for lb in all_labels if lb.tier == Tier.ONE):
-        t1_node = {"id": t1.id, "name": t1.name, "categories": []}
-        for t2 in (lb for lb in all_labels if lb.tier == Tier.TWO and lb.parent_id == t1.id):
-            t2_node = {
-                "id": t2.id,
-                "name": t2.name,
-                "color": t2.color,
-                "labels": [
-                    {"id": t3.id, "name": t3.name}
-                    for t3 in all_labels
-                    if t3.tier == Tier.THREE and t3.parent_id == t2.id
-                ],
-            }
-            t1_node["categories"].append(t2_node)
-        tree.append(t1_node)
-    return tree
+    parent_id: str
 
 
 @app.post("/labels")
-async def create_label(body: CreateLabelRequest):
+def create_label(body: CreateLabelRequest) -> Label:
     try:
-        label = label_store.create(body.name, body.parent_id)
+        return label_store.create(body.name, body.parent_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return label.model_dump()
+        raise HTTPException(400, str(e))
+
+
+class RenameLabelRequest(BaseModel):
+    new_name: Optional[str] = None
 
 
 @app.post("/labels/{name}/modify")
-async def modify_label(name: str, body: ModifyLabelRequest):
+def modify_label(name: str, body: RenameLabelRequest) -> Label:
     try:
-        label = label_store.modify(name, new_name=body.new_name)
+        return label_store.modify(name, new_name=body.new_name)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return label.model_dump()
+        raise HTTPException(400, str(e))
 
 
 @app.post("/labels/remove")
-async def remove_labels(body: RemoveRequest):
-    removed = label_store.remove(body.ids)
-    return [lb.model_dump() for lb in removed]
+def remove_labels(body: RemoveRequest) -> list[Label]:
+    return label_store.remove(body.ids)
 
 
-# --- Rule endpoints ---
-
-
-class CreateRuleRequest(BaseModel):
-    pattern: str   # regex
-    label_id: str  # tier-3 label id
+# ── Rule Endpoints ───────────────────────────────────────────────────
 
 
 @app.get("/rules")
-async def list_rules():
-    return [r.model_dump() for r in rule_store.list()]
+def list_rules() -> list[Rule]:
+    return rule_engine.rule_store.list()
+
+
+class CreateRuleRequest(BaseModel):
+    pattern: str
+    label_id: str
+
+
+class CreateRuleResponse(BaseModel):
+    rule: Rule
+    applied: int
 
 
 @app.post("/rules")
-async def create_rule(body: CreateRuleRequest):
+def create_rule(body: CreateRuleRequest) -> CreateRuleResponse:
     try:
-        rule = rule_store.create(body.pattern, body.label_id)
+        rule, modified = rule_engine.create_rule(body.pattern, body.label_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    # Immediately apply the new rule to all existing transactions
-    all_txs = store.read()
-    applied = rule_store.apply(all_txs)
-    return {
-        "rule": rule.model_dump(),
-        "applied": len(applied),
-    }
+        raise HTTPException(400, str(e))
+    return CreateRuleResponse(rule=rule, applied=len(modified))
 
 
 @app.post("/rules/remove")
-async def remove_rules(body: RemoveRequest):
-    removed = rule_store.remove(body.ids)
-    return [r.model_dump() for r in removed]
+def remove_rules(body: RemoveRequest) -> list[Rule]:
+    return rule_engine.rule_store.remove(body.ids)
+
+
+class ApplyRulesResponse(BaseModel):
+    applied: int
+    transactions: list[Transaction]
 
 
 @app.post("/rules/apply")
-async def apply_rules():
-    all_txs = store.read()
-    applied = rule_store.apply(all_txs)
-    return {
-        "applied": len(applied),
-        "transactions": [tx.model_dump(mode="json") for tx in applied],
-    }
+def apply_rules() -> ApplyRulesResponse:
+    modified = rule_engine.reapply_all()
+    return ApplyRulesResponse(applied=len(modified), transactions=modified)

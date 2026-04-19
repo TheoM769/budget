@@ -9,21 +9,18 @@ from ..models.transaction import Transaction
 class RuleStore(ABC):
     @abstractmethod
     def list(self) -> list[Rule]:
-        pass
+        """Return all rules."""
 
     @abstractmethod
     def create(self, pattern: str, label_id: str) -> Rule:
-        """Create a new rule. Raises ValueError if the label_id doesn't exist."""
-        pass
+        """Create a rule. Validate regex compiles and label_id is tier-3.
+        Raise ValueError otherwise."""
 
     @abstractmethod
     def remove(self, ids: str | list[str]) -> list[Rule]:
-        """Remove rule(s) by id. Returns the removed rules."""
-        pass
+        """Delete by id. Return removed records."""
 
     @abstractmethod
     def apply(self, transactions: list[Transaction]) -> list[Transaction]:
-        """Apply all rules to the given transactions.
-        Only unlabeled transactions are affected.
-        Returns the list of transactions that were modified."""
-        pass
+        """Apply all rules to given transactions. Only unlabelled affected.
+        First match wins. Persist label changes. Return modified transactions."""

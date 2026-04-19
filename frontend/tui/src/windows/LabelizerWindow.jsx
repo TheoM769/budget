@@ -1,301 +1,200 @@
-import React, { useState, useEffect } from "react";
-import { Box, Text, useInput, useStdout } from "ink";
-import TextInput from "ink-text-input";
-import Window from "../components/Window.jsx";
-import RuleForm from "../components/RuleForm.jsx";
-import StatusBar from "../components/StatusBar.jsx";
-import { getTransactions, modifyTransactions, getLabelTree, createRule } from "../utils/api.js";
-import { formatCurrency, truncate } from "../utils/formatting.js";
-import { colors, amountColor } from "../utils/theme.js";
+import React, { useState, useEffect } from 'react';
+import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
+import Window from '../components/Window.jsx';
+import RuleForm from '../components/RuleForm.jsx';
+import StatusBar from '../components/StatusBar.jsx';
+import { theme, amountColor } from '../utils/theme.js';
+import { api } from '../utils/api.js';
+import { formatAmount } from '../utils/formatting.js';
 
-const MODE = { NAV: "nav", LABEL: "label", RULE: "rule" };
-
-// ─── Transaction card ─────────────────────────────────────────────────────────
-
-function TxCard({ tx, index, total, width }) {
-  const amt = formatCurrency(tx.amount);
-
-  return (
-    <Box flexDirection="column">
-      <Box
-        borderStyle="double"
-        borderColor={colors.primary}
-        paddingX={2}
-        paddingY={1}
-        width={width}
-        flexDirection="column"
-      >
-        <Text wrap="truncate">
-          {/* Date: gray + italic */}
-          <Text color={colors.textMuted} italic>
-            {tx.date}
-          </Text>
-
-          {"  "}
-
-          {/* Description */}
-          <Text color={colors.text}>
-            {tx.description}
-          </Text>
-
-          {" "}
-
-          {/* Amount directly after description */}
-          <Text color={amountColor(tx.amount)}>
-            {amt}
-          </Text>
-        </Text>
-      </Box>
-
-      <Box justifyContent="center" width={width}>
-        <Text color={colors.textMuted}>
-          {index + 1} / {total}
-        </Text>
-      </Box>
-    </Box>
-  );
-}
-
-// ─── Label autocomplete ───────────────────────────────────────────────────────
-
-function LabelInput({ flat, onSubmit, onCancel }) {
-  const [value, setValue] = useState("");
-  const [selIdx, setSelIdx] = useState(0);
-  const [resetKey, setResetKey] = useState(0);
-
-  const suggestions = value.trim()
-    ? flat.filter((lb) => lb.name.toLowerCase().includes(value.toLowerCase()))
-    : flat.slice(0, 6);
-
-  useInput((_ch, key) => {
-    if (key.escape) { onCancel(); return; }
-    if (key.upArrow) { setSelIdx((i) => Math.max(0, i - 1)); return; }
-    if (key.downArrow) { setSelIdx((i) => Math.min(suggestions.length - 1, i + 1)); return; }
-    if (key.tab && suggestions[selIdx]) {
-      setValue(suggestions[selIdx].name);
-      setResetKey((k) => k + 1);
-    }
-  });
-
-  const handleSubmit = () => {
-    const chosen = suggestions[selIdx]?.name ?? value.trim();
-    if (chosen) onSubmit(chosen);
-  };
-
-  return (
-    <Box flexDirection="column">
-      <Box gap={1}>
-        <Text color={colors.primary}>│</Text>
-        <Text color={colors.textMuted}>Label:</Text>
-        <TextInput
-          key={resetKey}
-          value={value}
-          onChange={(v) => { setValue(v); setSelIdx(0); }}
-          onSubmit={handleSubmit}
-          placeholder="search labels..."
-        />
-      </Box>
-      {suggestions.slice(0, 5).map((lb, i) => (
-        <Box key={lb.id ?? lb.name} paddingLeft={2} gap={2}>
-          <Text color={i === selIdx ? colors.primary : colors.textMuted} bold={i === selIdx}>
-            {i === selIdx ? "▸" : " "} {lb.name}
-          </Text>
-          <Text color="#3a3a3a">{lb.category}</Text>
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-// ─── Categories panel ─────────────────────────────────────────────────────────
-
-function CategoriesPanel({ tree, height, width }) {
-  const lines = [];
-  for (const t1 of tree) {
-    for (const t2 of t1.categories || []) {
-      lines.push({ kind: "cat", name: t2.name, color: t2.color || colors.primary });
-      const tier3 = t2.labels || [];
-      for (let i = 0; i < tier3.length; i++) {
-        lines.push({ kind: "lbl", name: tier3[i].name, last: i === tier3.length - 1 });
-      }
-    }
-  }
-  const visible = lines.slice(0, height);
-
-  return (
-    <Box flexDirection="column" width={width}>
-      <Box>
-        <Text color={colors.textMuted}>{"─ Categories "}</Text>
-        <Text color={colors.textMuted}>{"─".repeat(Math.max(0, width - 14))}</Text>
-      </Box>
-      {visible.map((line, i) =>
-        line.kind === "cat" ? (
-          <Box key={i} gap={1}>
-            <Text color={line.color}>●</Text>
-            <Text color={colors.text}>{truncate(line.name, width - 4)}</Text>
-          </Box>
-        ) : (
-          <Box key={i}>
-            <Text color={colors.textMuted}>{"  "}{line.last ? "└" : "├"}{" "}</Text>
-            <Text color={colors.textMuted}>{truncate(line.name, width - 6)}</Text>
-          </Box>
-        )
-      )}
-      {lines.length > height && (
-        <Text color="#3a3a3a">  … {lines.length - height} more</Text>
-      )}
-    </Box>
-  );
-}
-
-// ─── Main window ──────────────────────────────────────────────────────────────
-
-export default function LabelizerWindow({ onClose }) {
+export default function LabelizerWindow({ onClose, cols }) {
   const [transactions, setTransactions] = useState([]);
+  const [index, setIndex] = useState(0);
+  const [mode, setMode] = useState('NAV'); // NAV | LABEL | RULE
+  const [labelQuery, setLabelQuery] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [allLabels, setAllLabels] = useState([]);
   const [tree, setTree] = useState([]);
-  const [flat, setFlat] = useState([]);
-  const [cursor, setCursor] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [status, setStatus] = useState(null);
-  const [mode, setMode] = useState(MODE.NAV);
-
-  const { stdout } = useStdout();
-  const rows = stdout?.rows || 24;
-  const cols = stdout?.columns || 80;
 
   const fetchData = async () => {
-    setLoading(true);
-    setError(null);
     try {
-      const [txs, t] = await Promise.all([getTransactions(), getLabelTree()]);
-      setTransactions(txs.filter((tx) => !tx.label_id));
-      setTree(t);
-      const f = [];
-      for (const t1 of t)
-        for (const t2 of t1.categories || [])
-          for (const t3 of t2.labels || [])
-            f.push({ ...t3, category: t2.name, group: t1.name });
-      setFlat(f);
+      const [txs, labels, treeData] = await Promise.all([
+        api.listTransactions(),
+        api.listLabels(3),
+        api.labelTree(),
+      ]);
+      const unlabeled = txs.filter((tx) => !tx.label_id);
+      setTransactions(unlabeled);
+      setAllLabels(labels);
+      setTree(treeData);
+      setIndex(0);
     } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      setStatus({ message: e.message, type: 'error' });
     }
   };
 
   useEffect(() => { fetchData(); }, []);
 
-  const current = transactions[cursor];
+  useEffect(() => {
+    if (mode === 'LABEL' && labelQuery.length > 0) {
+      const q = labelQuery.toLowerCase();
+      const matches = allLabels
+        .filter((lb) => lb.name.toLowerCase().includes(q))
+        .slice(0, 5);
+      setSuggestions(matches);
+      setSelectedIdx(0);
+    } else {
+      setSuggestions([]);
+    }
+  }, [labelQuery, mode, allLabels]);
 
-  useInput((ch, key) => {
-    if (mode !== MODE.NAV) return;
+  const tx = transactions[index];
+  const innerWidth = (cols || 80) - 6;
+  const catWidth = Math.min(34, Math.floor(innerWidth * 0.36));
+  const leftWidth = innerWidth - catWidth - 3;
+
+  useInput((input, key) => {
+    if (mode === 'RULE') return;
+
+    if (mode === 'LABEL') {
+      if (key.upArrow) setSelectedIdx((i) => Math.max(0, i - 1));
+      if (key.downArrow) setSelectedIdx((i) => Math.min(suggestions.length - 1, i + 1));
+      if (key.tab && suggestions.length > 0) {
+        const sel = suggestions[Math.min(selectedIdx, suggestions.length - 1)];
+        setLabelQuery(sel.name);
+      }
+      if (key.return && suggestions.length > 0) {
+        const sel = suggestions[Math.min(selectedIdx, suggestions.length - 1)];
+        api.modifyTransactions(tx.id, { label: sel.id })
+          .then(() => {
+            setStatus({ message: `Labeled as "${sel.name}"`, type: 'success' });
+            setTransactions((prev) => prev.filter((_, i) => i !== index));
+            if (index >= transactions.length - 1) setIndex(Math.max(0, index - 1));
+          })
+          .catch((e) => setStatus({ message: e.message, type: 'error' }));
+        setMode('NAV');
+        setLabelQuery('');
+      }
+      if (key.escape) {
+        setMode('NAV');
+        setLabelQuery('');
+      }
+      return;
+    }
+
+    // NAV mode
     if (key.escape) { onClose(); return; }
-    if (key.leftArrow || key.upArrow) setCursor((c) => Math.max(0, c - 1));
-    if (key.rightArrow || key.downArrow) setCursor((c) => Math.min(transactions.length - 1, c + 1));
-    if (key.return && current) setMode(MODE.LABEL);
-    if (ch === "s") setCursor((c) => Math.min(transactions.length - 1, c + 1));
-    if (ch === "c") setMode(MODE.RULE);
-    if (ch === "r") fetchData();
+    if ((key.leftArrow || key.upArrow) && index > 0) setIndex((i) => i - 1);
+    if ((key.rightArrow || key.downArrow) && index < transactions.length - 1) setIndex((i) => i + 1);
+    if (key.return && tx) {
+      setLabelQuery('');
+      setMode('LABEL');
+    }
+    if (input === 's' && index < transactions.length - 1) setIndex((i) => i + 1);
+    if (input === 'c' && tx) setMode('RULE');
+    if (input === 'r') fetchData();
   });
 
-  const handleLabelSubmit = async (labelName) => {
-    if (!current) { setMode(MODE.NAV); return; }
-    try {
-      await modifyTransactions([current.id], { label: labelName });
-      setStatus({ message: `Labeled "${truncate(current.description, 24)}" → ${labelName}`, type: "success" });
-      setTransactions((prev) => prev.filter((t) => t.id !== current.id));
-      setCursor((c) => Math.min(c, transactions.length - 2));
-    } catch (e) {
-      setStatus({ message: e.message, type: "error" });
-    }
-    setMode(MODE.NAV);
+  const handleRuleSubmit = (pattern, labelId) => {
+    api.createRule(pattern, labelId)
+      .then((res) => {
+        setStatus({ message: `Rule created, applied to ${res.applied} transaction(s)`, type: 'success' });
+        fetchData();
+      })
+      .catch((e) => setStatus({ message: e.message, type: 'error' }));
+    setMode('NAV');
   };
 
-  const handleRuleSubmit = async (pattern, labelId) => {
-    try {
-      const result = await createRule(pattern, labelId);
-      const applied = result.applied ?? 0;
-      setStatus({
-        message: `Rule created — ${applied} transaction${applied !== 1 ? "s" : ""} labeled`,
-        type: "success",
-      });
-      await fetchData();
-    } catch (e) {
-      setStatus({ message: e.message, type: "error" });
-    }
-    setMode(MODE.NAV);
-  };
-
-  // ── Layout ─────────────────────────────────────────────────────────────────
-  const bodyRows = rows - 7;
-  const CARD_ROWS = 7;
-  const panelRows = Math.max(3, bodyRows - CARD_ROWS - 2);
-  const innerWidth = cols - 6;
-  const rightWidth = Math.min(34, Math.floor(innerWidth * 0.36));
-  const leftWidth = innerWidth - rightWidth - 3;
-  const cardWidth = innerWidth;
-
-  const defaultPattern = current
-    ? (current.description.toUpperCase().split(/\s+/).find((w) => w.length >= 3) ?? "")
-    : "";
-
-  const footerMap = {
-    [MODE.NAV]: "enter:label  c:create rule  s:skip  ←→:navigate  r:refresh  esc:back",
-    [MODE.LABEL]: "↑↓:navigate  tab:complete  enter:confirm  esc:cancel",
-    [MODE.RULE]: "enter:next/confirm  tab:complete  esc:cancel",
-  };
+  const footer = '↑↓:suggestions │ tab:complete │ enter:confirm │ esc:cancel';
 
   return (
-    <Window title={`LABELIZER — ${transactions.length} unlabeled`} footer={footerMap[mode]}>
-      {loading && <Text color={colors.warning}>Loading...</Text>}
-      {error && <Text color={colors.danger}>Error: {error}</Text>}
+    <Window title={`LABELIZER — ${transactions.length} unlabeled`} footer={footer}>
+      {!tx ? (
+        <Text color={theme.success}>All transactions labeled!</Text>
+      ) : (
+        <Box flexDirection="column" flexGrow={1}>
+          {/* Transaction card */}
+          <Box
+            borderStyle="double"
+            borderColor={theme.text}
+            paddingX={1}
+            marginBottom={1}
+          >
+            <Text color={theme.textMuted}>{tx.date}</Text>
+            <Text>{'   '}</Text>
+            <Text>{tx.description}</Text>
+            <Box flexGrow={1} />
+            <Text color={amountColor(tx.amount)}>{formatAmount(tx.amount)}</Text>
+          </Box>
 
-      {!loading && transactions.length === 0 && (
-        <Text color={colors.success}>All transactions are labeled!</Text>
-      )}
+          <Text color={theme.textMuted}>
+            {index + 1} / {transactions.length}
+          </Text>
 
-      {!loading && transactions.length > 0 && current && (
-        <Box flexDirection="column" gap={1}>
-          <TxCard tx={current} index={cursor} total={transactions.length} width={cardWidth} />
-
-          <Box flexDirection="row">
-            {/* Left: action area */}
-            <Box flexDirection="column" width={leftWidth} paddingLeft={1}>
-              {mode === MODE.NAV && (
-                <Text color="#3a3a3a">enter to label  ·  c to create a rule</Text>
+          {/* Two-column layout */}
+          <Box marginTop={1} flexGrow={1}>
+            {/* Left: label input */}
+            <Box flexDirection="column" width={leftWidth}>
+              {mode === 'LABEL' && (
+                <Box flexDirection="column">
+                  <Box>
+                    <Text color={theme.primary}>Label: </Text>
+                    <TextInput value={labelQuery} onChange={setLabelQuery} />
+                  </Box>
+                  {suggestions.map((lb, i) => (
+                    <Box key={lb.id} gap={1} marginLeft={2}>
+                      <Text color={i === selectedIdx ? theme.primary : theme.text}>
+                        {i === selectedIdx ? '▸' : ' '} {lb.name}
+                      </Text>
+                      <Text color={theme.textMuted}>{lb.parent_id || ''}</Text>
+                    </Box>
+                  ))}
+                </Box>
               )}
-              {mode === MODE.LABEL && (
-                <LabelInput
-                  flat={flat}
-                  onSubmit={handleLabelSubmit}
-                  onCancel={() => setMode(MODE.NAV)}
-                />
-              )}
-              {mode === MODE.RULE && (
-                <RuleForm
-                  flat={flat}
-                  defaultPattern={defaultPattern}
-                  onSubmit={handleRuleSubmit}
-                  onCancel={() => setMode(MODE.NAV)}
-                />
+              {mode === 'NAV' && (
+                <Text color={theme.textMuted}>Press Enter to label, s to skip</Text>
               )}
             </Box>
 
-            {/* Divider */}
-            <Box flexDirection="column" width={3}>
-              {Array.from({ length: panelRows }).map((_, i) => (
-                <Text key={i} color={colors.textMuted}>{" │"}</Text>
+            {/* Separator */}
+            <Box marginX={1}>
+              <Text color={theme.textMuted}>│</Text>
+            </Box>
+
+            {/* Right: categories tree */}
+            <Box flexDirection="column" width={catWidth}>
+              <Text bold color={theme.textMuted}>─ Categories ─</Text>
+              {tree.map((group) => (
+                <Box key={group.id} flexDirection="column">
+                  {group.categories.map((cat) => (
+                    <Box key={cat.id} flexDirection="column">
+                      <Text color={cat.color || theme.text}>● {cat.name}</Text>
+                      {cat.labels.map((lb) => (
+                        <Text key={lb.id} color={theme.textMuted}>
+                          {'  '}├ {lb.name}
+                        </Text>
+                      ))}
+                    </Box>
+                  ))}
+                </Box>
               ))}
             </Box>
-
-            {/* Right: categories */}
-            <CategoriesPanel tree={tree} height={panelRows} width={rightWidth} />
           </Box>
         </Box>
       )}
 
-      {status && <StatusBar message={status.message} type={status.type} />}
+      {mode === 'RULE' && tx && (
+        <RuleForm
+          transaction={tx}
+          onSubmit={handleRuleSubmit}
+          onCancel={() => setMode('NAV')}
+        />
+      )}
+
+      <StatusBar message={status?.message} type={status?.type} />
     </Window>
   );
 }

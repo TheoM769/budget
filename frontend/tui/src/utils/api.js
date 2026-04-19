@@ -1,8 +1,9 @@
-const API_BASE = process.env.BUDGET_API_URL || "http://localhost:8000";
+const BASE_URL = process.env.BUDGET_API_URL || 'http://localhost:8000';
 
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...options.headers },
+  const url = `${BASE_URL}${path}`;
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
   });
   if (!res.ok) {
@@ -12,113 +13,89 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-// --- Transactions ---
+export const api = {
+  // Transactions
+  listTransactions: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.date_from) qs.set('date_from', params.date_from);
+    if (params.date_to) qs.set('date_to', params.date_to);
+    if (params.description) qs.set('description', params.description);
+    const q = qs.toString();
+    return request(`/transactions${q ? `?${q}` : ''}`);
+  },
 
-export async function getTransactions(filters = {}) {
-  const params = new URLSearchParams();
-  if (filters.dateFrom) params.set("date_from", filters.dateFrom);
-  if (filters.dateTo) params.set("date_to", filters.dateTo);
-  if (filters.description) params.set("description", filters.description);
-  if (filters.amountOp) params.set("amount_op", filters.amountOp);
-  if (filters.amountValue != null)
-    params.set("amount_value", filters.amountValue);
-  const qs = params.toString();
-  return request(`/transactions${qs ? `?${qs}` : ""}`);
-}
+  uploadTransactions: async (filePath) => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const body = fs.readFileSync(filePath);
+    const filename = path.basename(filePath);
+    const boundary = `----FormBoundary${Date.now()}`;
+    const payload = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: text/csv\r\n\r\n`),
+      body,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    const res = await fetch(`${BASE_URL}/transactions/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body: payload,
+    });
+    if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+    return res.json();
+  },
 
-export async function removeTransactions(ids) {
-  return request("/transactions/remove", {
-    method: "POST",
-    body: JSON.stringify({ ids }),
-  });
-}
+  modifyTransactions: (ids, { description, label } = {}) =>
+    request('/transactions/modify', {
+      method: 'POST',
+      body: JSON.stringify({ ids, description, label }),
+    }),
 
-export async function modifyTransactions(ids, { description, label } = {}) {
-  return request("/transactions/modify", {
-    method: "POST",
-    body: JSON.stringify({ ids, description, label }),
-  });
-}
+  removeTransactions: (ids) =>
+    request('/transactions/remove', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
-export async function uploadTransactions(filePath) {
-  const fs = await import("node:fs");
-  const path = await import("node:path");
+  // Labels
+  listLabels: (tier) => {
+    const q = tier != null ? `?tier=${tier}` : '';
+    return request(`/labels${q}`);
+  },
 
-  const content = fs.readFileSync(filePath, "latin1");
-  const fileName = path.basename(filePath);
+  labelTree: () => request('/labels/tree'),
 
-  const boundary = `----FormBoundary${Date.now()}`;
-  const body =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n` +
-    `Content-Type: text/csv\r\n\r\n` +
-    `${content}\r\n` +
-    `--${boundary}--\r\n`;
+  createLabel: (name, parent_id) =>
+    request('/labels', {
+      method: 'POST',
+      body: JSON.stringify({ name, parent_id }),
+    }),
 
-  const res = await fetch(`${API_BASE}/transactions/upload`, {
-    method: "POST",
-    headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
-    body,
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
-  }
-  return res.json();
-}
+  modifyLabel: (name, newName) =>
+    request(`/labels/${encodeURIComponent(name)}/modify`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName }),
+    }),
 
-// --- Labels ---
+  removeLabels: (ids) =>
+    request('/labels/remove', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
-export async function getLabels(tier) {
-  const qs = tier != null ? `?tier=${tier}` : "";
-  return request(`/labels${qs}`);
-}
+  // Rules
+  listRules: () => request('/rules'),
 
-export async function getLabelTree() {
-  return request("/labels/tree");
-}
+  createRule: (pattern, label_id) =>
+    request('/rules', {
+      method: 'POST',
+      body: JSON.stringify({ pattern, label_id }),
+    }),
 
-export async function createLabel(name, parentId) {
-  return request("/labels", {
-    method: "POST",
-    body: JSON.stringify({ name, parent_id: parentId }),
-  });
-}
+  removeRules: (ids) =>
+    request('/rules/remove', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
-export async function modifyLabel(name, newName) {
-  return request(`/labels/${encodeURIComponent(name)}/modify`, {
-    method: "POST",
-    body: JSON.stringify({ new_name: newName }),
-  });
-}
-
-export async function removeLabels(ids) {
-  return request("/labels/remove", {
-    method: "POST",
-    body: JSON.stringify({ ids }),
-  });
-}
-
-// --- Rules ---
-
-export async function getRules() {
-  return request("/rules");
-}
-
-export async function createRule(pattern, labelId) {
-  return request("/rules", {
-    method: "POST",
-    body: JSON.stringify({ pattern, label_id: labelId }),
-  });
-}
-
-export async function removeRules(ids) {
-  return request("/rules/remove", {
-    method: "POST",
-    body: JSON.stringify({ ids }),
-  });
-}
-
-export async function applyRules() {
-  return request("/rules/apply", { method: "POST" });
-}
+  applyRules: () => request('/rules/apply', { method: 'POST' }),
+};

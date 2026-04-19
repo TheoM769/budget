@@ -1,74 +1,62 @@
-import React, { useState } from "react";
-import { Box, Text, useInput } from "ink";
-import TextInput from "ink-text-input";
-import { colors } from "../utils/theme.js";
+import React, { useState } from 'react';
+import { Box, Text, useInput } from 'ink';
+import TextInput from 'ink-text-input';
+import { theme } from '../utils/theme.js';
 
 const COMMANDS = [
-  { name: "/transactions", description: "Manage transactions" },
-  { name: "/labels",       description: "Manage labels & categories" },
-  { name: "/labelize",     description: "Bulk-label transactions" },
-  { name: "/analyze",      description: "Analytics dashboard" },
-  { name: "/import",       description: "Import transactions from CSV" },
-  { name: "/quit",         description: "Exit application" },
+  { name: '/transactions', desc: 'Browse transactions' },
+  { name: '/labels', desc: 'Manage labels' },
+  { name: '/labelize', desc: 'Label transactions' },
+  { name: '/analyze', desc: 'Spending analytics' },
+  { name: '/import', desc: 'Import CSV file' },
+  { name: '/quit', desc: 'Exit' },
 ];
 
 export default function CommandInput({ onCommand }) {
-  const [input, setInput] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [inputKey, setInputKey] = useState(0);
+  const [value, setValue] = useState('');
+  const [selectedIdx, setSelectedIdx] = useState(0);
 
-  const showSuggestions = input.startsWith("/");
-  const filtered = showSuggestions
-    ? COMMANDS.filter((c) => c.name.toLowerCase().startsWith(input.toLowerCase()))
+  const suggestions = value.startsWith('/')
+    ? COMMANDS.filter((c) => c.name.startsWith(value))
     : [];
 
-  useInput((ch, key) => {
-    if (key.upArrow && filtered.length > 0)
-      setSelectedIndex((i) => Math.max(0, i - 1));
-    if (key.downArrow && filtered.length > 0)
-      setSelectedIndex((i) => Math.min(filtered.length - 1, i + 1));
-    if (key.tab && filtered.length > 0) {
-      setInput(filtered[selectedIndex].name);
-      setInputKey((k) => k + 1);
+  useInput((input, key) => {
+    if (key.upArrow && suggestions.length > 0) {
+      setSelectedIdx((i) => Math.max(0, i - 1));
+    }
+    if (key.downArrow && suggestions.length > 0) {
+      setSelectedIdx((i) => Math.min(suggestions.length - 1, i + 1));
+    }
+    if (key.tab && suggestions.length > 0) {
+      const cmd = suggestions[Math.min(selectedIdx, suggestions.length - 1)];
+      setValue(cmd.name);
+      setSelectedIdx(0);
+    }
+    if (key.return) {
+      const match = COMMANDS.find((c) => c.name === value);
+      if (match) {
+        const cmd = match.name.slice(1); // strip /
+        setValue('');
+        setSelectedIdx(0);
+        onCommand(cmd);
+      }
     }
   });
 
-  const handleSubmit = () => {
-    const cmd = input.trim();
-    if (!cmd) return;
-    if (filtered.length > 0 && filtered[selectedIndex]) {
-      onCommand(filtered[selectedIndex].name.slice(1));
-    } else if (cmd.startsWith("/")) {
-      onCommand(cmd.slice(1));
-    }
-    setInput("");
-    setSelectedIndex(0);
-  };
-
   return (
     <Box flexDirection="column">
-      <Box gap={1}>
-        <Text color={colors.textMuted}>{">"}</Text>
-        <TextInput
-          key={inputKey}
-          value={input}
-          onChange={(val) => { setInput(val); setSelectedIndex(0); }}
-          onSubmit={handleSubmit}
-          placeholder="Type / for commands..."
-        />
+      <Box>
+        <Text color={theme.primary}>{'> '}</Text>
+        <TextInput value={value} onChange={(v) => { setValue(v); setSelectedIdx(0); }} />
       </Box>
-
-      {showSuggestions && filtered.length > 0 && (
-        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
-          {filtered.map((cmd, i) => (
-            <Box key={cmd.name} gap={2}>
-              <Text
-                color={i === selectedIndex ? colors.primary : colors.textMuted}
-                bold={i === selectedIndex}
-              >
-                {i === selectedIndex ? "▸" : " "} {cmd.name}
+      {suggestions.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          {suggestions.map((cmd, i) => (
+            <Box key={cmd.name} gap={1}>
+              <Text color={i === selectedIdx ? theme.primary : theme.text}>
+                {i === selectedIdx ? '▸' : ' '} {cmd.name}
               </Text>
-              <Text color="#3a3a3a">{cmd.description}</Text>
+              <Text color={theme.textMuted}>{cmd.desc}</Text>
             </Box>
           ))}
         </Box>
