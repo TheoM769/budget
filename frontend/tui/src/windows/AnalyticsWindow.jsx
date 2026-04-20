@@ -14,13 +14,13 @@ function buildBar(value, max) {
   return "█".repeat(filled) + "░".repeat(BAR_WIDTH - filled);
 }
 
-const SANKEY_HEIGHT = 14;
 const MAX_LEFT_BAR = 10;
 const FLOW_W = 12;
 const MAX_RIGHT_BAR = 16;
-const LEFT_LABEL_W = 14;
-const RIGHT_LABEL_W = 16;
-const AMOUNT_W = 12;
+const LEFT_LABEL_W = 20;
+const LEFT_AMOUNT_W = 8;
+const RIGHT_LABEL_W = 20;
+const RIGHT_AMOUNT_W = 9;
 
 const PALETTE = [
   "#5865F2", "#FAA61A", "#9B59B6", "#1ABC9C",
@@ -59,6 +59,7 @@ function expandBands(bands, maxBarW, totalVal) {
     const barW = Math.max(1, Math.round((band.value / totalVal) * maxBarW));
     return Array.from({ length: band.height }, (_, i) => ({
       showLabel: i === Math.floor(band.height / 2),
+      key: band.key,
       label: band.label,
       color: band.color,
       barW,
@@ -99,22 +100,36 @@ function SankeyDiagram({ transactions, tree }) {
     );
   }
 
-  const idToName = buildLabelMap(tree);
-  const idToColor = buildLabelColorMap(tree);
+  // Build label → category map
+  const labelToCatId = {};
+  const catInfo = {};
+  for (const t1 of tree) {
+    for (const t2 of t1.categories ?? []) {
+      catInfo[String(t2.id)] = { name: t2.name, color: t2.color };
+      for (const t3 of t2.labels ?? []) {
+        labelToCatId[String(t3.id)] = String(t2.id);
+      }
+    }
+  }
 
-  // Group income by source label
+  const getCatKey = (tx) => {
+    const lid = tx.label_id ? String(tx.label_id) : null;
+    return lid ? (labelToCatId[lid] ?? "Other") : "Other";
+  };
+
+  // Group income by tier-2 category
   const incomeGroups = {};
   for (const tx of transactions) {
     if (tx.amount <= 0) continue;
-    const key = tx.label_id ? String(tx.label_id) : "Other";
+    const key = getCatKey(tx);
     incomeGroups[key] = (incomeGroups[key] || 0) + tx.amount;
   }
 
-  // Group expenses by label
+  // Group expenses by tier-2 category
   const expenseGroups = {};
   for (const tx of transactions) {
     if (tx.amount >= 0) continue;
-    const key = tx.label_id ? String(tx.label_id) : "Unlabeled";
+    const key = getCatKey(tx);
     expenseGroups[key] = (expenseGroups[key] || 0) + Math.abs(tx.amount);
   }
 
@@ -128,8 +143,8 @@ function SankeyDiagram({ transactions, tree }) {
     .map(([key, value], idx) => ({
       key,
       value,
-      label: idToName[key] || key,
-      color: idToColor[key] || PALETTE[idx % PALETTE.length],
+      label: key === "Other" ? "Other" : (catInfo[key]?.name ?? key),
+      color: catInfo[key]?.color || PALETTE[idx % PALETTE.length],
     }));
 
   const rightItems = Object.entries(expenseGroups)
@@ -137,23 +152,24 @@ function SankeyDiagram({ transactions, tree }) {
     .map(([key, value], idx) => ({
       key,
       value,
-      label: idToName[key] || key,
+      label: key === "Savings" ? "Savings" : key === "Other" ? "Other" : (catInfo[key]?.name ?? key),
       isSavings: key === "Savings",
       color:
         key === "Savings"
           ? colors.success
-          : idToColor[key] || PALETTE[(idx + leftItems.length) % PALETTE.length],
+          : catInfo[key]?.color || PALETTE[(idx + leftItems.length) % PALETTE.length],
     }));
 
   if (!leftItems.length && !rightItems.length) {
     return <Text color={colors.textMuted}>No flow data.</Text>;
   }
 
+  const sankeyHeight = Math.max(leftItems.length, rightItems.length);
   const leftTotal = Math.max(totalIncome, 0.01);
   const rightTotal = Math.max(totalIncome, totalExpense, 0.01);
 
-  const leftBands = allocateRows(leftItems, SANKEY_HEIGHT);
-  const rightBands = allocateRows(rightItems, SANKEY_HEIGHT);
+  const leftBands = allocateRows(leftItems, sankeyHeight);
+  const rightBands = allocateRows(rightItems, sankeyHeight);
 
   const leftRows = expandBands(leftBands, MAX_LEFT_BAR, leftTotal);
   const rightRows = expandBands(rightBands, MAX_RIGHT_BAR, rightTotal);
@@ -181,21 +197,28 @@ function SankeyDiagram({ transactions, tree }) {
       </Text>
       <Box marginBottom={0}>
         <Text color={colors.textMuted}>
-          {"INCOME SOURCES".padEnd(LEFT_LABEL_W + MAX_LEFT_BAR + FLOW_W + 2)}
+          {"INCOME SOURCES".padEnd(LEFT_AMOUNT_W + LEFT_LABEL_W + MAX_LEFT_BAR + FLOW_W + 2)}
         </Text>
         <Text color={colors.textMuted}>EXPENSES / SAVINGS</Text>
       </Box>
-      {Array.from({ length: SANKEY_HEIGHT }, (_, i) => {
+      {Array.from({ length: sankeyHeight }, (_, i) => {
         const left = leftRows[i];
         const right = rightRows[i];
-        const showLeftAmount = left?.showLabel && leftLabelAmounts[left.key];
         const showRightAmount = right?.showLabel && rightLabelAmounts[right.key];
         return (
           <Box key={i}>
+            {/* Left amount */}
+            {left?.showLabel && leftLabelAmounts[left.key] ? (
+              <Text color={left.color}>
+                {formatAmount(leftLabelAmounts[left.key]).padStart(LEFT_AMOUNT_W)}
+              </Text>
+            ) : (
+              <Text>{" ".repeat(LEFT_AMOUNT_W)}</Text>
+            )}
             {/* Left label */}
             {left?.showLabel ? (
               <Text color={left.color}>
-                {left.label.slice(0, LEFT_LABEL_W).padEnd(LEFT_LABEL_W)}
+                {" "}{left.label.slice(0, LEFT_LABEL_W - 1).padEnd(LEFT_LABEL_W - 1)}
               </Text>
             ) : (
               <Text>{" ".repeat(LEFT_LABEL_W)}</Text>
@@ -223,32 +246,95 @@ function SankeyDiagram({ transactions, tree }) {
             {/* Right label */}
             {right?.showLabel ? (
               <Text color={right.color}>
-                {" "}{right.label.slice(0, RIGHT_LABEL_W)}
+                {" "}{right.label.slice(0, RIGHT_LABEL_W - 1).padEnd(RIGHT_LABEL_W - 1)}
               </Text>
             ) : (
-              <Text>{" ".repeat(RIGHT_LABEL_W + 1)}</Text>
+              <Text>{" ".repeat(RIGHT_LABEL_W)}</Text>
             )}
-            {/* Amount on the right */}
+            {/* Right amount */}
             {showRightAmount ? (
               <Text color={right.color}>
-                {formatAmount(-rightLabelAmounts[right.key]).padStart(AMOUNT_W)}
+                {formatAmount(rightLabelAmounts[right.key]).padStart(RIGHT_AMOUNT_W)}
               </Text>
             ) : (
-              <Text>{" ".repeat(AMOUNT_W)}</Text>
+              <Text>{" ".repeat(RIGHT_AMOUNT_W)}</Text>
             )}
           </Box>
         );
       })}
-      {/* Income amounts at the bottom */}
-      <Box marginTop={0}>
-        <Text>{" ".repeat(LEFT_LABEL_W)}</Text>
-        <Text color={colors.textMuted}>
-          {leftItems
-            .map((item) => formatAmount(item.value).padStart(MAX_LEFT_BAR))
-            .join("")}
-        </Text>
-        <Text>{" ".repeat(FLOW_W + MAX_RIGHT_BAR + RIGHT_LABEL_W + 1)}</Text>
-      </Box>
+    </Box>
+  );
+}
+
+const CAT_BAR_W = 30;
+
+function CategoryBarChart({ transactions, tree }) {
+  if (!transactions.length) return null;
+
+  // Build label → category map
+  const labelToCat = {};
+  const catColors = {};
+  for (const t1 of tree) {
+    for (const t2 of t1.categories ?? []) {
+      const color = t2.color || PALETTE[Object.keys(catColors).length % PALETTE.length];
+      catColors[String(t2.id)] = color;
+      for (const t3 of t2.labels ?? []) {
+        labelToCat[String(t3.id)] = { id: String(t2.id), name: t2.name };
+      }
+    }
+  }
+
+  // Aggregate expenses by (category, month), then compute mean across months
+  const catMonthly = {}; // key → { [month]: total }
+  for (const tx of transactions) {
+    if (tx.amount >= 0) continue;
+    const labelKey = tx.label_id ? String(tx.label_id) : null;
+    const cat = labelKey ? labelToCat[labelKey] : null;
+    const key = cat ? cat.id : "__unlabeled__";
+    const month = tx.date.slice(0, 7);
+    if (!catMonthly[key]) catMonthly[key] = {};
+    catMonthly[key][month] = (catMonthly[key][month] || 0) + Math.abs(tx.amount);
+  }
+
+  const entries = Object.entries(catMonthly)
+    .map(([key, byMonth]) => {
+      const monthlyTotals = Object.values(byMonth);
+      const mean = monthlyTotals.reduce((s, v) => s + v, 0) / monthlyTotals.length;
+      return {
+        key,
+        name: key === "__unlabeled__" ? "Unlabeled" : (tree.flatMap(t1 => t1.categories ?? []).find(c => String(c.id) === key)?.name ?? key),
+        mean,
+        count: monthlyTotals.length,
+        color: catColors[key] || colors.textMuted,
+      };
+    })
+    .sort((a, b) => b.mean - a.mean);
+
+  if (!entries.length) return null;
+
+  const maxMean = entries[0].mean;
+  const NAME_W = 30;
+  const COUNT_W = 6;
+
+  const formatAmount = (val) => {
+    if (val >= 1000) return `€${(val / 1000).toFixed(1)}k`;
+    return `€${val.toFixed(0)}`;
+  };
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color={colors.primary}>AVG SPEND BY CATEGORY</Text>
+      {entries.map((e) => {
+        const filled = Math.max(1, Math.round((e.mean / maxMean) * CAT_BAR_W));
+        return (
+          <Box key={e.key}>
+            <Text color={e.color}>{e.name.slice(0, NAME_W).padEnd(NAME_W)}</Text>
+            <Text color={e.color}>{"█".repeat(filled)}{"░".repeat(CAT_BAR_W - filled)}</Text>
+            <Text color={e.color}>{" "}{formatAmount(e.mean).padEnd(8)}</Text>
+            <Text color={colors.textMuted}>{e.count.toString().padStart(COUNT_W - 2)}{"mo"}</Text>
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -440,6 +526,9 @@ export default function AnalyticsWindow({ onClose }) {
 
           {/* Sankey diagram — full width */}
           <SankeyDiagram transactions={transactions} tree={tree} />
+
+          {/* Category mean spend bar chart */}
+          <CategoryBarChart transactions={transactions} tree={tree} />
         </Box>
       )}
     </Window>
