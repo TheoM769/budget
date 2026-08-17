@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
-from typing import Optional
 
 from ..models.label import Label, Tier, _generate_id
 from ..ports import LabelStore
@@ -12,8 +11,9 @@ COL_NAME = "name"
 COL_TIER = "tier"
 COL_PARENT_ID = "parent_id"
 COL_COLOR = "color"
+COL_MANDATORY = "mandatory"
 
-FIELDNAMES = [COL_ID, COL_NAME, COL_TIER, COL_PARENT_ID, COL_COLOR]
+FIELDNAMES = [COL_ID, COL_NAME, COL_TIER, COL_PARENT_ID, COL_COLOR, COL_MANDATORY]
 
 
 def _build_seed_data() -> list[Label]:
@@ -116,7 +116,7 @@ class TsvLabelStore(LabelStore):
         if not self._path.exists():
             self._write_all(_build_seed_data())
 
-    def list(self, tier: Optional[Tier] = None) -> list[Label]:
+    def list(self, tier: Tier | None = None) -> list[Label]:
         all_labels = self._read_all()
         if tier is not None:
             return [lb for lb in all_labels if lb.tier == tier]
@@ -165,7 +165,7 @@ class TsvLabelStore(LabelStore):
         self._write_all(remaining)
         return removed
 
-    def modify(self, name: str, new_name: Optional[str] = None) -> Label:
+    def modify(self, name: str, new_name: str | None = None) -> Label:
         existing = self._read_all()
         target = None
         for lb in existing:
@@ -210,6 +210,7 @@ class TsvLabelStore(LabelStore):
                     tier=int(row[COL_TIER]),
                     parent_id=row[COL_PARENT_ID] or None,
                     color=row[COL_COLOR] or None,
+                    mandatory=(row.get(COL_MANDATORY) or "").lower() == "true",
                 )
                 for row in reader
             ]
@@ -225,4 +226,5 @@ class TsvLabelStore(LabelStore):
                     COL_TIER: lb.tier.value,
                     COL_PARENT_ID: lb.parent_id or "",
                     COL_COLOR: lb.color or "",
+                    COL_MANDATORY: "true" if lb.mandatory else "",
                 })

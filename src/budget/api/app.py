@@ -1,18 +1,20 @@
 from datetime import date
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, Query, UploadFile
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-
-from fastapi import HTTPException
 
 from ..adapters.csv_transaction_reader import CsvTransactionReader
 from ..adapters.tsv_label_store import TsvLabelStore
 from ..adapters.tsv_rule_store import TsvRuleStore
 from ..adapters.tsv_transaction_store import TsvTransactionStore
-from ..models import AmountFilter, AmountOp, TransactionFilter
-from ..models import ModifyRequest, RemoveRequest
+from ..models import (
+    AmountFilter,
+    AmountOp,
+    ModifyRequest,
+    RemoveRequest,
+    TransactionFilter,
+)
 from ..models.label import Tier
 
 app = FastAPI()
@@ -40,11 +42,11 @@ async def upload_transactions(file: UploadFile):
 
 @app.get("/transactions")
 async def read_transactions(
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    description: Optional[str] = Query(None),
-    amount_op: Optional[AmountOp] = Query(None),
-    amount_value: Optional[float] = Query(None),
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
+    description: str | None = Query(None),
+    amount_op: AmountOp | None = Query(None),
+    amount_value: float | None = Query(None),
 ):
     transactions = store.read()
 
@@ -87,11 +89,11 @@ class CreateLabelRequest(BaseModel):
 
 
 class ModifyLabelRequest(BaseModel):
-    new_name: Optional[str] = None
+    new_name: str | None = None
 
 
 @app.get("/labels")
-async def list_labels(tier: Optional[int] = Query(None)):
+async def list_labels(tier: int | None = Query(None)):
     """List labels, optionally filtered by tier (1, 2, or 3)."""
     t = Tier(tier) if tier is not None else None
     return [lb.model_dump() for lb in label_store.list(tier=t)]
@@ -112,7 +114,7 @@ async def label_tree():
                 "name": t2.name,
                 "color": t2.color,
                 "labels": [
-                    {"id": t3.id, "name": t3.name}
+                    {"id": t3.id, "name": t3.name, "mandatory": t3.mandatory}
                     for t3 in all_labels
                     if t3.tier == Tier.THREE and t3.parent_id == t2.id
                 ],

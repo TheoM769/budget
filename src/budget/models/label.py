@@ -1,6 +1,5 @@
 import uuid
 from enum import IntEnum
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -19,5 +18,6 @@ class Label(BaseModel):
     id: str
     name: str
     tier: Tier
-    parent_id: Optional[str] = None
-    color: Optional[str] = None  # only tier 2 labels have a color
+    parent_id: str | None = None
+    color: str | None = None  # only tier 2 labels have a color
+    mandatory: bool = False  # only tier 3 labels use this

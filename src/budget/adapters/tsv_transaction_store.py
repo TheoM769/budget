@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 from datetime import date
 from pathlib import Path
-from typing import Optional
 
 from ..models import Transaction
 from ..ports import LabelStore, TransactionStore
@@ -76,8 +75,8 @@ class TsvTransactionStore(TransactionStore):
     def modify(
         self,
         ids: str | list[str],
-        description: Optional[str] = None,
-        label: Optional[str] = None,
+        description: str | None = None,
+        label: str | None = None,
     ) -> list[Transaction]:
         if isinstance(ids, str):
             ids = [ids]

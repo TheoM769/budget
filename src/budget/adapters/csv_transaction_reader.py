@@ -5,7 +5,6 @@ from datetime import date, datetime
 from ..models import Transaction
 from ..ports import TransactionReader
 
-
 COL_DATE = "Date"
 COL_DESCRIPTION = "Libellé"
 COL_AMOUNT = "Montant(EUROS)"

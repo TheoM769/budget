@@ -266,9 +266,148 @@ function SankeyDiagram({ transactions, tree }) {
   );
 }
 
+// --- Discretionary Pie Chart ---
+
+
+function DiscretionaryBarChart({ transactions, tree, monthSpan }) {
+  if (!transactions.length) return null;
+
+  // Build tier-3 label info with mandatory flag
+  const labelInfo = {};
+  for (const t1 of tree) {
+    for (const t2 of t1.categories ?? []) {
+      for (const t3 of t2.labels ?? []) {
+        labelInfo[String(t3.id)] = {
+          name: t3.name,
+          mandatory: t3.mandatory ?? false,
+          color: t2.color,
+        };
+      }
+    }
+  }
+
+  // Aggregate total expenses by tier-3 label, non-mandatory only
+  const labelTotals = {};
+  for (const tx of transactions) {
+    if (tx.amount >= 0) continue;
+    const lid = tx.label_id ? String(tx.label_id) : null;
+    if (!lid) continue;
+    const info = labelInfo[lid];
+    if (!info || info.mandatory) continue;
+    labelTotals[lid] = (labelTotals[lid] || 0) + Math.abs(tx.amount);
+  }
+
+  const entries = Object.entries(labelTotals)
+    .map(([lid, total]) => ({
+      lid,
+      mean: total / monthSpan,
+      ...labelInfo[lid],
+    }))
+    .filter((e) => e.mean > 0)
+    .sort((a, b) => b.mean - a.mean);
+
+  if (!entries.length) return null;
+
+  entries.forEach((e, i) => {
+    if (!e.color) e.color = PALETTE[i % PALETTE.length];
+  });
+
+  const maxMean = entries[0].mean;
+  const NAME_W = 30;
+
+  const formatAmount = (val) => {
+    if (val >= 1000) return `€${(val / 1000).toFixed(1)}k`;
+    return `€${val.toFixed(0)}`;
+  };
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color={colors.primary}>DISCRETIONARY SPEND (avg/mo)</Text>
+      {entries.map((e) => {
+        const filled = Math.max(1, Math.round((e.mean / maxMean) * CAT_BAR_W));
+        return (
+          <Box key={e.lid}>
+            <Text color={e.color}>{e.name.slice(0, NAME_W).padEnd(NAME_W)}</Text>
+            <Text color={e.color}>{"█".repeat(filled)}{"░".repeat(CAT_BAR_W - filled)}</Text>
+            <Text color={e.color}>{" "}{formatAmount(e.mean).padEnd(8)}</Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+function MandatoryBarChart({ transactions, tree, monthSpan }) {
+  if (!transactions.length) return null;
+
+  // Build tier-3 label info with mandatory flag
+  const labelInfo = {};
+  for (const t1 of tree) {
+    for (const t2 of t1.categories ?? []) {
+      for (const t3 of t2.labels ?? []) {
+        labelInfo[String(t3.id)] = {
+          name: t3.name,
+          mandatory: t3.mandatory ?? false,
+          color: t2.color,
+        };
+      }
+    }
+  }
+
+  // Aggregate total expenses by tier-3 label, mandatory only
+  const labelTotals = {};
+  for (const tx of transactions) {
+    if (tx.amount >= 0) continue;
+    const lid = tx.label_id ? String(tx.label_id) : null;
+    if (!lid) continue;
+    const info = labelInfo[lid];
+    if (!info || !info.mandatory) continue;
+    labelTotals[lid] = (labelTotals[lid] || 0) + Math.abs(tx.amount);
+  }
+
+  const entries = Object.entries(labelTotals)
+    .map(([lid, total]) => ({
+      lid,
+      mean: total / monthSpan,
+      ...labelInfo[lid],
+    }))
+    .filter((e) => e.mean > 0)
+    .sort((a, b) => b.mean - a.mean);
+
+  if (!entries.length) return null;
+
+  entries.forEach((e, i) => {
+    if (!e.color) e.color = PALETTE[i % PALETTE.length];
+  });
+
+  const maxMean = entries[0].mean;
+  const NAME_W = 30;
+
+  const formatAmount = (val) => {
+    if (val >= 1000) return `€${(val / 1000).toFixed(1)}k`;
+    return `€${val.toFixed(0)}`;
+  };
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color={colors.primary}>MANDATORY EXPENSES (avg/mo)</Text>
+      {entries.map((e) => {
+        const filled = Math.max(1, Math.round((e.mean / maxMean) * CAT_BAR_W));
+        return (
+          <Box key={e.lid}>
+            <Text color={e.color}>{e.name.slice(0, NAME_W).padEnd(NAME_W)}</Text>
+            <Text color={e.color}>{"█".repeat(filled)}{"░".repeat(CAT_BAR_W - filled)}</Text>
+            <Text color={e.color}>{" "}{formatAmount(e.mean).padEnd(8)}</Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
 const CAT_BAR_W = 30;
 
-function CategoryBarChart({ transactions, tree }) {
+function CategoryBarChart({ transactions, tree, monthSpan }) {
   if (!transactions.length) return null;
 
   // Build label → category map
@@ -284,37 +423,29 @@ function CategoryBarChart({ transactions, tree }) {
     }
   }
 
-  // Aggregate expenses by (category, month), then compute mean across months
-  const catMonthly = {}; // key → { [month]: total }
+  // Aggregate total expenses by category
+  const catTotals = {};
   for (const tx of transactions) {
     if (tx.amount >= 0) continue;
     const labelKey = tx.label_id ? String(tx.label_id) : null;
     const cat = labelKey ? labelToCat[labelKey] : null;
     const key = cat ? cat.id : "__unlabeled__";
-    const month = tx.date.slice(0, 7);
-    if (!catMonthly[key]) catMonthly[key] = {};
-    catMonthly[key][month] = (catMonthly[key][month] || 0) + Math.abs(tx.amount);
+    catTotals[key] = (catTotals[key] || 0) + Math.abs(tx.amount);
   }
 
-  const entries = Object.entries(catMonthly)
-    .map(([key, byMonth]) => {
-      const monthlyTotals = Object.values(byMonth);
-      const mean = monthlyTotals.reduce((s, v) => s + v, 0) / monthlyTotals.length;
-      return {
-        key,
-        name: key === "__unlabeled__" ? "Unlabeled" : (tree.flatMap(t1 => t1.categories ?? []).find(c => String(c.id) === key)?.name ?? key),
-        mean,
-        count: monthlyTotals.length,
-        color: catColors[key] || colors.textMuted,
-      };
-    })
+  const entries = Object.entries(catTotals)
+    .map(([key, total]) => ({
+      key,
+      name: key === "__unlabeled__" ? "Unlabeled" : (tree.flatMap(t1 => t1.categories ?? []).find(c => String(c.id) === key)?.name ?? key),
+      mean: total / monthSpan,
+      color: catColors[key] || colors.textMuted,
+    }))
     .sort((a, b) => b.mean - a.mean);
 
   if (!entries.length) return null;
 
   const maxMean = entries[0].mean;
   const NAME_W = 30;
-  const COUNT_W = 6;
 
   const formatAmount = (val) => {
     if (val >= 1000) return `€${(val / 1000).toFixed(1)}k`;
@@ -323,7 +454,7 @@ function CategoryBarChart({ transactions, tree }) {
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text bold color={colors.primary}>AVG SPEND BY CATEGORY</Text>
+      <Text bold color={colors.primary}>AVG SPEND BY CATEGORY ({monthSpan}mo)</Text>
       {entries.map((e) => {
         const filled = Math.max(1, Math.round((e.mean / maxMean) * CAT_BAR_W));
         return (
@@ -331,7 +462,6 @@ function CategoryBarChart({ transactions, tree }) {
             <Text color={e.color}>{e.name.slice(0, NAME_W).padEnd(NAME_W)}</Text>
             <Text color={e.color}>{"█".repeat(filled)}{"░".repeat(CAT_BAR_W - filled)}</Text>
             <Text color={e.color}>{" "}{formatAmount(e.mean).padEnd(8)}</Text>
-            <Text color={colors.textMuted}>{e.count.toString().padStart(COUNT_W - 2)}{"mo"}</Text>
           </Box>
         );
       })}
@@ -419,6 +549,18 @@ export default function AnalyticsWindow({ onClose }) {
     else byMonth[month].expense += Math.abs(tx.amount);
   }
   const months = Object.keys(byMonth).sort();
+
+  // Compute month span for average base (rounded up)
+  const monthSpan = (() => {
+    if (dateFilter.from && dateFilter.to) {
+      const from = new Date(dateFilter.from);
+      const to = new Date(dateFilter.to);
+      const diff = (to - from) / (1000 * 60 * 60 * 24 * 30.44);
+      return Math.ceil(diff) || 1;
+    }
+    // No filter: use distinct months in data
+    return months.length || 1;
+  })();
 
   const filterLabel =
     dateFilter.from
@@ -527,8 +669,12 @@ export default function AnalyticsWindow({ onClose }) {
           {/* Sankey diagram — full width */}
           <SankeyDiagram transactions={transactions} tree={tree} />
 
-          {/* Category mean spend bar chart */}
-          <CategoryBarChart transactions={transactions} tree={tree} />
+          {/* Category + Discretionary + Mandatory bar charts side by side */}
+          <Box flexDirection="row" gap={4}>
+            <CategoryBarChart transactions={transactions} tree={tree} monthSpan={monthSpan} />
+            <DiscretionaryBarChart transactions={transactions} tree={tree} monthSpan={monthSpan} />
+            <MandatoryBarChart transactions={transactions} tree={tree} monthSpan={monthSpan} />
+          </Box>
         </Box>
       )}
     </Window>

@@ -1,7 +1,6 @@
 import re
 from datetime import date
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -22,10 +21,10 @@ class AmountFilter(BaseModel):
 
 
 class TransactionFilter(BaseModel):
-    date_from: Optional[date] = None
-    date_to: Optional[date] = None
-    description: Optional[str] = None
-    amount: Optional[AmountFilter] = None
+    date_from: date | None = None
+    date_to: date | None = None
+    description: str | None = None
+    amount: AmountFilter | None = None
 
     def apply(self, transactions: list[Transaction]) -> list[Transaction]:
         result = transactions
