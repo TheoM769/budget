@@ -74,7 +74,9 @@ async def remove_transactions(body: RemoveRequest):
 @app.post("/transactions/modify")
 async def modify_transactions(body: ModifyRequest):
     try:
-        modified = store.modify(body.ids, description=body.description, label=body.label)
+        modified = store.modify(
+            body.ids, description=body.description, label=body.label
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return [tx.model_dump(mode="json") for tx in modified]
@@ -108,7 +110,9 @@ async def label_tree():
     tree = []
     for t1 in (lb for lb in all_labels if lb.tier == Tier.ONE):
         t1_node = {"id": t1.id, "name": t1.name, "categories": []}
-        for t2 in (lb for lb in all_labels if lb.tier == Tier.TWO and lb.parent_id == t1.id):
+        for t2 in (
+            lb for lb in all_labels if lb.tier == Tier.TWO and lb.parent_id == t1.id
+        ):
             t2_node = {
                 "id": t2.id,
                 "name": t2.name,
@@ -152,7 +156,7 @@ async def remove_labels(body: RemoveRequest):
 
 
 class CreateRuleRequest(BaseModel):
-    pattern: str   # regex
+    pattern: str  # regex
     label_id: str  # tier-3 label id
 
 

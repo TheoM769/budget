@@ -26,12 +26,16 @@ def _build_seed_data() -> list[Label]:
         return lb.id
 
     def t2(name: str, parent: str, color: str) -> str:
-        lb = Label(id=_generate_id(), name=name, tier=Tier.TWO, parent_id=parent, color=color)
+        lb = Label(
+            id=_generate_id(), name=name, tier=Tier.TWO, parent_id=parent, color=color
+        )
         labels.append(lb)
         return lb.id
 
     def t3(name: str, parent: str) -> None:
-        labels.append(Label(id=_generate_id(), name=name, tier=Tier.THREE, parent_id=parent))
+        labels.append(
+            Label(id=_generate_id(), name=name, tier=Tier.THREE, parent_id=parent)
+        )
 
     # --- Tier 1: Expense ---
     expense = t1("Expense")
@@ -148,7 +152,9 @@ class TsvLabelStore(LabelStore):
         if any(lb.name == name and lb.tier == Tier.THREE for lb in existing):
             raise ValueError(f"Tier-3 label '{name}' already exists.")
 
-        label = Label(id=_generate_id(), name=name, tier=Tier.THREE, parent_id=parent_id)
+        label = Label(
+            id=_generate_id(), name=name, tier=Tier.THREE, parent_id=parent_id
+        )
         existing.append(label)
         self._write_all(existing)
         return label
@@ -159,8 +165,12 @@ class TsvLabelStore(LabelStore):
         name_set = set(names)
 
         existing = self._read_all()
-        removed = [lb for lb in existing if lb.tier == Tier.THREE and lb.name in name_set]
-        remaining = [lb for lb in existing if not (lb.tier == Tier.THREE and lb.name in name_set)]
+        removed = [
+            lb for lb in existing if lb.tier == Tier.THREE and lb.name in name_set
+        ]
+        remaining = [
+            lb for lb in existing if not (lb.tier == Tier.THREE and lb.name in name_set)
+        ]
 
         self._write_all(remaining)
         return removed
@@ -177,7 +187,11 @@ class TsvLabelStore(LabelStore):
             raise ValueError(f"Tier-3 label '{name}' not found.")
 
         if new_name is not None:
-            if any(lb.name == new_name and lb.tier == Tier.THREE for lb in existing if lb is not target):
+            if any(
+                lb.name == new_name and lb.tier == Tier.THREE
+                for lb in existing
+                if lb is not target
+            ):
                 raise ValueError(f"Tier-3 label '{new_name}' already exists.")
             target.name = new_name
 
@@ -220,11 +234,13 @@ class TsvLabelStore(LabelStore):
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES, delimiter="\t")
             writer.writeheader()
             for lb in labels:
-                writer.writerow({
-                    COL_ID: lb.id,
-                    COL_NAME: lb.name,
-                    COL_TIER: lb.tier.value,
-                    COL_PARENT_ID: lb.parent_id or "",
-                    COL_COLOR: lb.color or "",
-                    COL_MANDATORY: "true" if lb.mandatory else "",
-                })
+                writer.writerow(
+                    {
+                        COL_ID: lb.id,
+                        COL_NAME: lb.name,
+                        COL_TIER: lb.tier.value,
+                        COL_PARENT_ID: lb.parent_id or "",
+                        COL_COLOR: lb.color or "",
+                        COL_MANDATORY: "true" if lb.mandatory else "",
+                    }
+                )

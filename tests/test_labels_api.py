@@ -8,7 +8,9 @@ from budget.api import app as app_module
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     """API client backed by a temporary (seeded) label store."""
-    monkeypatch.setattr(app_module, "label_store", TsvLabelStore(tmp_path / "labels.tsv"))
+    monkeypatch.setattr(
+        app_module, "label_store", TsvLabelStore(tmp_path / "labels.tsv")
+    )
     return TestClient(app_module.app)
 
 

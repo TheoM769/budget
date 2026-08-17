@@ -9,5 +9,5 @@ def _generate_id() -> str:
 
 class Rule(BaseModel):
     id: str
-    pattern: str   # regex applied to transaction description
+    pattern: str  # regex applied to transaction description
     label_id: str  # tier-3 label id to apply

@@ -106,8 +106,10 @@ class TsvRuleStore(RuleStore):
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES, delimiter="\t")
             writer.writeheader()
             for rule in rules:
-                writer.writerow({
-                    COL_ID: rule.id,
-                    COL_PATTERN: rule.pattern,
-                    COL_LABEL_ID: rule.label_id,
-                })
+                writer.writerow(
+                    {
+                        COL_ID: rule.id,
+                        COL_PATTERN: rule.pattern,
+                        COL_LABEL_ID: rule.label_id,
+                    }
+                )
